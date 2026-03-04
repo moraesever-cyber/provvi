@@ -1,0 +1,28 @@
+# Android
+*.iml
+.gradle/
+local.properties
+.idea/
+build/
+*.apk
+*.aab
+
+# iOS
+.DS_Store
+Pods/
+*.xcworkspace
+DerivedData/
+*.ipa
+
+# Rust
+target/
+Cargo.lock   # manter para binaries, remover para libraries
+
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Env
+.env
+*.env.local
