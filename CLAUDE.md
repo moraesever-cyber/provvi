@@ -34,3 +34,49 @@ Seguros Brasil — vistorias de veículos, prevenção de fraude em sinistros.
 - Kotlin + Coroutines, sem RxJava
 - Sem dependências de UI no SDK (sem Activity, Fragment, View)
 - Sealed classes para resultados de operações
+
+---
+
+## Status do Projeto
+
+### Fase 0 — Concluída (Mar 2026)
+Pipeline Android implementado e validado externamente via CAI Verify.
+
+**Entregáveis concluídos:**
+- Pipeline de captura Android completo (5 camadas ADR-001)
+- Sistema de asserções extensível (ProvviAssertions + GenericAssertions)
+- HabilitAiAssertions.kt — arquivo de entrega para cliente HabilitAi
+- provvi-sdk-release.aar (7MB) compilando limpo
+- Manifesto C2PA validado via verify.contentcredentials.org e c2patool
+- validation_state: Valid — claimSignature.validated, dataHash.match
+
+**Pendente da Fase 0 — incorporado nas fases seguintes:**
+- iOS: AVFoundation pipeline → Fase 1 paralelo ao demo Flutter
+- Backend de assinatura (AWS Lambda Rust + S3, latência < 800ms P95) → Fase 1
+- Detecção de recaptura v1.0 (Moiré via FFT, ADR-002) → Fase 1 pós-demo
+- Documentação PT-BR completa → ao longo da Fase 1
+
+**Certificado de desenvolvimento:**
+- Ed25519, CA:FALSE, digitalSignature, CN=Provvi Dev, O=Provvi, C=BR
+- Localização: android/provvi-sdk/src/main/rust/src/ (excluído do git via .gitignore)
+- signingCredential.untrusted esperado — certificado não está na CAI Trust List
+
+---
+
+### Fase 1 — Em andamento (Mai–Jun 2026)
+
+**Próximo passo imediato:** app demo Flutter
+- Objetivo: validar SDK end-to-end em dispositivo físico antes de integrar HabilitAi
+- Usa GenericAssertions (sem asserções específicas de domínio)
+- Platform Channels: Flutter → SDK nativo Android
+
+**Sequência planejada Fase 1:**
+1. App demo Flutter (em andamento)
+2. Testes de ataque no ambiente do demo
+3. Wrapper MAUI/.NET para HabilitAi
+4. Integração ML Kit liveness → custom assertion
+5. Fluxo offline-first
+
+**Decisão arquitetural registrada:**
+- Demo Flutter antes da integração HabilitAi — ambiente isolado para amadurecer o SDK
+- MAUI continua no escopo da Fase 1, após o demo
