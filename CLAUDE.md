@@ -80,3 +80,16 @@ Pipeline Android implementado e validado externamente via CAI Verify.
 **Decisão arquitetural registrada:**
 - Demo Flutter antes da integração HabilitAi — ambiente isolado para amadurecer o SDK
 - MAUI continua no escopo da Fase 1, após o demo
+
+**Sequência obrigatória após qualquer alteração no provvi-sdk:**
+1. `./gradlew :provvi-sdk:assembleRelease`
+2. `cp android/provvi-sdk/build/outputs/aar/provvi-sdk-release.aar demo-app/android/app/libs/`
+3. `cd demo-app && flutter build apk --debug`
+
+Esquecer o passo 2 faz o demo rodar com o .aar antigo — sintoma: comportamento divergente entre SDK e demo.
+
+**ADR-002 Caminho 1 — implementado:**
+- RecaptureDetector.kt: Moiré (FFT, peso 0.5) + reflexo especular (peso 0.3) + padrão cromático (peso 0.2)
+- Thresholds iniciais: SUSPICIOUS > 0.6, calibração pendente com dataset real
+- Risco principal: falso negativo em telas OLED/4K (Moiré menos pronunciado)
+- Demo atualizado com tratamento de RECAPTURE_SUSPECTED
