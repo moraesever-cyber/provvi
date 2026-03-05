@@ -108,6 +108,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
       'PERMISSION_DENIED'    => 'Permissão negada — conceda acesso à câmera e localização.',
       'DEVICE_COMPROMISED'   => 'Dispositivo comprometido — captura bloqueada por segurança.',
       'MOCK_LOCATION'        => 'Localização simulada detectada — desative apps de GPS falso.',
+      'RECAPTURE_SUSPECTED'  => 'Recaptura detectada — fotografe o objeto real, não uma tela',
       'SIGNING_FAILED'       => 'Falha na assinatura C2PA: ${message ?? "erro desconhecido"}',
       'CAPTURE_ERROR'        => 'Erro na captura: ${message ?? "erro desconhecido"}',
       _                      => 'Erro inesperado ($code): ${message ?? ""}',

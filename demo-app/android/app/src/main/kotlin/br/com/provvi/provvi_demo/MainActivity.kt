@@ -89,6 +89,12 @@ class MainActivity : FlutterActivity() {
                     result.error("DEVICE_COMPROMISED", "Dispositivo comprometido", null)
                 br.com.provvi.CaptureOutcome.MockLocationDetected ->
                     result.error("MOCK_LOCATION", "Localização simulada detectada", null)
+                is br.com.provvi.CaptureOutcome.RecaptureSuspected ->
+                    result.error(
+                        "RECAPTURE_SUSPECTED",
+                        "Possível recaptura detectada (score: ${"%.2f".format(outcome.score)}, indicadores: ${outcome.indicators.joinToString()})",
+                        null
+                    )
             }
         }
     }

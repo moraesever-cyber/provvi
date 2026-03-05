@@ -16,6 +16,9 @@ import br.com.provvi.camera.SecureCameraCapture
 import br.com.provvi.location.LocationResult
 import br.com.provvi.location.LocationValidationOutcome
 import br.com.provvi.location.LocationValidator
+import br.com.provvi.recapture.RecaptureAnalysis
+import br.com.provvi.recapture.RecaptureDetector
+import br.com.provvi.recapture.RecaptureIndicator
 import br.com.provvi.security.DeviceIntegrityChecker
 import br.com.provvi.security.DeviceVerdict
 import br.com.provvi.security.IntegrityResult
@@ -92,6 +95,12 @@ sealed class CaptureOutcome {
 
     // GPS reportou localização simulada — possível fraude em andamento
     data object MockLocationDetected : CaptureOutcome()
+
+    // Análise de recaptura detectou artefatos de tela com score acima do limiar (ADR-002, Caminho 1)
+    data class RecaptureSuspected(
+        val score:      Float,
+        val indicators: List<RecaptureIndicator>
+    ) : CaptureOutcome()
 
     // Falha na assinatura C2PA do manifesto (Camada 4)
     data class SigningFailed(val reason: String) : CaptureOutcome()
@@ -228,6 +237,26 @@ class ProvviCapture(context: Context) {
 
         val successFrame = firstFrame as CaptureResult.Success
 
+        // -----------------------------------------------------------------
+        // ADR-002 Caminho 1: Detecção de recaptura por artefatos físicos de tela.
+        //
+        // Executada ANTES de yuvToJpeg() enquanto os buffers YUV ainda são válidos
+        // (a sessão Camera2 ainda está aberta). Captura suspeita é bloqueada aqui —
+        // o frame não é convertido nem assinado, reduzindo superfície de ataque.
+        // -----------------------------------------------------------------
+        val recaptureAnalysis = RecaptureDetector.analyze(successFrame.imageProxy)
+
+        if (recaptureAnalysis is RecaptureAnalysis.Suspicious) {
+            // Libera recursos antes de retornar — mesma sequência do caminho de erro normal
+            successFrame.imageProxy.close()
+            cameraCapture.stopCapture()
+            frameChannel.close()
+            return CaptureOutcome.RecaptureSuspected(
+                score      = recaptureAnalysis.score,
+                indicators = recaptureAnalysis.indicators
+            )
+        }
+
         // Converte o frame YUV_420_888 para JPEG antes de liberar a sessão de câmera
         val jpegBytes = yuvToJpeg(successFrame.imageProxy)
 
@@ -265,6 +294,10 @@ class ProvviCapture(context: Context) {
             } else {
                 put("device_integrity_unavailable", true)
             }
+
+            // ADR-002 Caminho 1: resultado da análise de recaptura (Clean ou Inconclusive aqui,
+            // pois Suspicious já retornou mais cedo no pipeline)
+            putAll(RecaptureDetector.toManifestAssertion(recaptureAnalysis))
 
             // Asserções do integrador — convertidas via ProvviAssertions.toMap()
             putAll(assertions.toMap())
