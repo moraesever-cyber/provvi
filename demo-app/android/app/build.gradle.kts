@@ -50,4 +50,5 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.google.android.play:integrity:1.4.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.8.7")
 }

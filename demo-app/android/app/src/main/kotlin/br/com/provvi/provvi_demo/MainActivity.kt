@@ -8,6 +8,7 @@ import br.com.provvi.ProvviCapture
 import br.com.provvi.assertions.GenericAssertions
 import br.com.provvi.camera.CaptureError
 import br.com.provvi.camera.CaptureResult
+import androidx.lifecycle.ProcessLifecycleOwner
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -59,7 +60,7 @@ class MainActivity : FlutterActivity() {
 
         CoroutineScope(Dispatchers.Main).launch {
             val outcome = provviCapture.capture(
-                lifecycleOwner = this@MainActivity,
+                lifecycleOwner = ProcessLifecycleOwner.get(),
                 assertions = GenericAssertions(
                     capturedBy  = capturedBy,
                     referenceId = referenceId
