@@ -26,3 +26,6 @@ Cargo.lock   # manter para binaries, remover para libraries
 # Env
 .env
 *.env.local
+# Certificados de desenvolvimento — nunca comitar chaves privadas
+*.pem
+android/provvi-sdk/src/main/rust/src/test_*.pem
