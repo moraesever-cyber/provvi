@@ -6,6 +6,8 @@ import android.graphics.Rect
 import android.graphics.YuvImage
 import androidx.camera.core.ImageProxy
 import androidx.lifecycle.LifecycleOwner
+import br.com.provvi.assertions.GenericAssertions
+import br.com.provvi.assertions.ProvviAssertions
 import br.com.provvi.c2pa.C2paEngine
 import br.com.provvi.c2pa.C2paResult
 import br.com.provvi.camera.CaptureError
@@ -132,13 +134,14 @@ class ProvviCapture(context: Context) {
      *
      * @param lifecycleOwner    Controla o tempo de vida da sessão de câmera.
      *                          A câmera é liberada assim que o primeiro frame é capturado.
-     * @param customAssertions  Asserções adicionais do integrador incluídas no manifesto C2PA
-     *                          (ex.: número da apólice, placa do veículo).
+     * @param assertions        Asserções do integrador incluídas no manifesto C2PA.
+     *                          Use [GenericAssertions] para campos livres ou forneça uma
+     *                          implementação específica do domínio (ex.: HabilitAiAssertions).
      * @return [CaptureOutcome] com a sessão assinada ou o motivo da falha.
      */
     suspend fun capture(
         lifecycleOwner: LifecycleOwner,
-        customAssertions: Map<String, Any> = emptyMap()
+        assertions: ProvviAssertions = GenericAssertions()
     ): CaptureOutcome {
 
         // Identificador único da sessão — usado como nonce da Play Integrity API
@@ -263,8 +266,8 @@ class ProvviCapture(context: Context) {
                 put("device_integrity_unavailable", true)
             }
 
-            // Asserções customizadas do integrador (ex.: número da apólice, placa)
-            putAll(customAssertions)
+            // Asserções do integrador — convertidas via ProvviAssertions.toMap()
+            putAll(assertions.toMap())
         }
 
         // -----------------------------------------------------------------
