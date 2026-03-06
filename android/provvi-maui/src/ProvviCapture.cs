@@ -350,8 +350,59 @@ public sealed class ProvviCapture : IDisposable
             FrameHashHex       = GetString("getFrameHashHex"),
             LocationSuspicious = GetBool("getLocationSuspicious"),
             CapturedAtNanos    = GetLong("getCapturedAtNanos"),
+            HasIntegrityToken  = GetBool("getHasIntegrityToken"),
             ManifestUrl        = GetString("getManifestUrl"),
+            PipelineTimingsMs  = ExtractTimings(session, sessionClass),
         };
+    }
+
+    private static IReadOnlyDictionary<string, long> ExtractTimings(
+        IntPtr session, IntPtr sessionClass)
+    {
+        try
+        {
+            var mapMethod = JNIEnv.GetMethodID(sessionClass,
+                "getPipelineTimingsMs", "()Ljava/util/Map;");
+            var mapObj = JNIEnv.CallObjectMethod(session, mapMethod);
+            if (mapObj == IntPtr.Zero) return new Dictionary<string, long>();
+
+            // Itera entrySet() do Map Java
+            var mapClass   = JNIEnv.FindClass("java/util/Map");
+            var entrySetId = JNIEnv.GetMethodID(mapClass, "entrySet", "()Ljava/util/Set;");
+            var entrySet   = JNIEnv.CallObjectMethod(mapObj, entrySetId);
+
+            var setClass   = JNIEnv.FindClass("java/util/Set");
+            var iteratorId = JNIEnv.GetMethodID(setClass, "iterator", "()Ljava/util/Iterator;");
+            var iterator   = JNIEnv.CallObjectMethod(entrySet, iteratorId);
+
+            var iterClass  = JNIEnv.FindClass("java/util/Iterator");
+            var hasNextId  = JNIEnv.GetMethodID(iterClass, "hasNext", "()Z");
+            var nextId     = JNIEnv.GetMethodID(iterClass, "next", "()Ljava/lang/Object;");
+
+            var entryClass = JNIEnv.FindClass("java/util/Map$Entry");
+            var getKeyId   = JNIEnv.GetMethodID(entryClass, "getKey", "()Ljava/lang/Object;");
+            var getValueId = JNIEnv.GetMethodID(entryClass, "getValue", "()Ljava/lang/Object;");
+
+            var longClass  = JNIEnv.FindClass("java/lang/Long");
+            var longValueId = JNIEnv.GetMethodID(longClass, "longValue", "()J");
+
+            var result = new Dictionary<string, long>();
+            while (JNIEnv.CallBooleanMethod(iterator, hasNextId))
+            {
+                var entry  = JNIEnv.CallObjectMethod(iterator, nextId);
+                var keyObj = JNIEnv.CallObjectMethod(entry, getKeyId);
+                var valObj = JNIEnv.CallObjectMethod(entry, getValueId);
+
+                var key = JNIEnv.GetString(keyObj, JniHandleOwnership.TransferLocalRef) ?? "";
+                var val = JNIEnv.CallLongMethod(valObj, longValueId);
+                result[key] = val;
+            }
+            return result;
+        }
+        catch
+        {
+            return new Dictionary<string, long>();
+        }
     }
 
     private static string ExtractErrorReason(IntPtr handle, string method)

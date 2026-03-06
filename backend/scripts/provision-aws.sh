@@ -104,6 +104,21 @@ do
     fi
 done
 
+# Política inline de assinatura KMS — idempotente (put-role-policy sobrescreve)
+echo "  Configurando política KMS..."
+aws iam put-role-policy \
+  --role-name "${ROLE_NAME}" \
+  --policy-name provvi-kms-signing \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Action": ["kms:Sign", "kms:Verify", "kms:GetPublicKey"],
+      "Resource": "arn:aws:kms:sa-east-1:978594444223:key/9c9b9b16-6310-4b80-8699-184135ec4cb3"
+    }]
+  }'
+echo "  ✓ Política KMS configurada."
+
 # IAM é eventualmente consistente — aguarda propagação antes de usar o role
 echo "  Aguardando propagação do IAM (10s)..."
 sleep 10
@@ -226,6 +241,7 @@ echo "  Fazendo deploy..."
     --env-var "S3_BUCKET=${BUCKET_NAME}" \
     --env-var "DYNAMODB_TABLE=${TABLE_NAME}" \
     --env-var "API_KEY=${API_KEY}" \
+    --env-var "KMS_KEY_ID=9c9b9b16-6310-4b80-8699-184135ec4cb3" \
     "${FUNCTION_NAME}")
 echo "  ✓ Deploy concluído."
 

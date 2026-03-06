@@ -43,6 +43,8 @@ struct SignResponse {
     processed_at: String,
     /// Status do armazenamento
     status: String,
+    /// Indica se a re-assinatura KMS foi bem-sucedida
+    kms_signed: bool,
 }
 
 /// Resposta de erro padronizada
@@ -110,6 +112,7 @@ async fn handler(
     let config    = aws_config::load_from_env().await;
     let s3        = aws_sdk_s3::Client::new(&config);
     let dynamodb  = aws_sdk_dynamodb::Client::new(&config);
+    let kms       = aws_sdk_kms::Client::new(&config);
 
     let bucket    = std::env::var("S3_BUCKET").unwrap_or_else(|_| "provvi-manifests-dev".to_string());
     let table     = std::env::var("DYNAMODB_TABLE").unwrap_or_else(|_| "provvi-sessions".to_string());
@@ -147,7 +150,7 @@ async fn handler(
     s3.put_object()
         .bucket(&bucket)
         .key(&manifest_key)
-        .body(ByteStream::from(req.manifest_json.into_bytes()))
+        .body(ByteStream::from(req.manifest_json.clone().into_bytes()))
         .content_type("application/json")
         .send()
         .await
@@ -156,7 +159,27 @@ async fn handler(
     info!(key = %manifest_key, "Manifesto salvo no S3");
 
     // ------------------------------------------------------------------
-    // 4. Gera URL presigned para acesso ao manifesto (válida 7 dias)
+    // 4. Re-assina o manifesto com KMS (validade jurídica via ICP-Brasil)
+    //    Falha no KMS não invalida a sessão — assinatura local permanece válida.
+    // ------------------------------------------------------------------
+    let (kms_signature_hex, kms_public_key_hex) = match sign_with_kms(&kms, &req.manifest_json).await {
+        Ok(sig) => {
+            info!(session_id = %req.session_id, "Manifesto re-assinado via KMS");
+            let pub_key = get_kms_public_key(&kms).await.unwrap_or_default();
+            (sig, pub_key)
+        }
+        Err(e) => {
+            tracing::warn!(
+                session_id = %req.session_id,
+                error = %e,
+                "Falha na re-assinatura KMS — mantendo assinatura local"
+            );
+            ("".to_string(), "".to_string())
+        }
+    };
+
+    // ------------------------------------------------------------------
+    // 5. Gera URL presigned para acesso ao manifesto (válida 7 dias)
     // ------------------------------------------------------------------
     let presigned_config = aws_sdk_s3::presigning::PresigningConfig::expires_in(
         std::time::Duration::from_secs(7 * 24 * 3600),
@@ -173,7 +196,7 @@ async fn handler(
         .to_string();
 
     // ------------------------------------------------------------------
-    // 5. Registra a sessão no DynamoDB
+    // 6. Registra a sessão no DynamoDB
     // ------------------------------------------------------------------
     dynamodb
         .put_item()
@@ -185,6 +208,9 @@ async fn handler(
         .item("image_s3_key",    AttributeValue::S(image_key.clone()))
         .item("processed_at",    AttributeValue::S(processed_at.clone()))
         .item("assertions",      AttributeValue::S(req.assertions.to_string()))
+        .item("kms_signature",   AttributeValue::S(kms_signature_hex.clone()))
+        .item("kms_public_key",  AttributeValue::S(kms_public_key_hex.clone()))
+        .item("kms_signed",      AttributeValue::Bool(!kms_signature_hex.is_empty()))
         .item("status",          AttributeValue::S("stored".to_string()))
         .send()
         .await
@@ -196,8 +222,71 @@ async fn handler(
         session_id:   req.session_id,
         manifest_url,
         processed_at,
-        status: "stored".to_string(),
+        status:       "stored".to_string(),
+        kms_signed:   !kms_signature_hex.is_empty(),
     })
+}
+
+/// Re-assina o manifesto C2PA usando AWS KMS (ECC_NIST_P256).
+///
+/// O dispositivo já assinou com cert dev (garante integridade local).
+/// Esta assinatura adiciona validade jurídica via certificado ICP-Brasil
+/// armazenado no KMS (quando disponível — por ora usa chave KMS pura).
+///
+/// Retorna a assinatura DER em hex para registro no DynamoDB.
+async fn sign_with_kms(
+    kms: &aws_sdk_kms::Client,
+    manifest_json: &str,
+) -> Result<String, Error> {
+    use sha2::{Sha256, Digest};
+
+    let key_id = std::env::var("KMS_KEY_ID")
+        .unwrap_or_else(|_| "alias/provvi-c2pa-signing".to_string());
+
+    // Hash SHA-256 do manifesto — KMS assina o hash, não o conteúdo completo
+    let mut hasher = Sha256::new();
+    hasher.update(manifest_json.as_bytes());
+    let digest = hasher.finalize();
+
+    let response = kms
+        .sign()
+        .key_id(&key_id)
+        .message(aws_sdk_kms::primitives::Blob::new(digest.as_slice()))
+        .message_type(aws_sdk_kms::types::MessageType::Digest)
+        .signing_algorithm(aws_sdk_kms::types::SigningAlgorithmSpec::EcdsaSha256)
+        .send()
+        .await
+        .map_err(|e| format!("Falha na assinatura KMS: {e}"))?;
+
+    let signature_bytes = response
+        .signature()
+        .ok_or("KMS não retornou assinatura")?
+        .as_ref();
+
+    Ok(hex::encode(signature_bytes))
+}
+
+/// Busca a chave pública KMS para verificação externa.
+/// Retorna a chave em formato DER hex.
+async fn get_kms_public_key(
+    kms: &aws_sdk_kms::Client,
+) -> Result<String, Error> {
+    let key_id = std::env::var("KMS_KEY_ID")
+        .unwrap_or_else(|_| "alias/provvi-c2pa-signing".to_string());
+
+    let response = kms
+        .get_public_key()
+        .key_id(&key_id)
+        .send()
+        .await
+        .map_err(|e| format!("Falha ao obter chave pública KMS: {e}"))?;
+
+    let pub_key_bytes = response
+        .public_key()
+        .ok_or("KMS não retornou chave pública")?
+        .as_ref();
+
+    Ok(hex::encode(pub_key_bytes))
 }
 
 #[tokio::main]
