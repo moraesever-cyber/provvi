@@ -287,7 +287,7 @@ após a captura local completar.
 ---
 
 ## DT-012 — Migração Assinatura C2PA para Backend (KMS)
-**Prioridade:** Alta | **Status:** Em implementação | **Registrado:** 2026-03-06
+**Status:** ✅ Resolvido | **Resolvido em:** 2026-03-06
 
 **Decisão arquitetural:**
 Manter assinatura local com cert dev como fallback de integridade.
