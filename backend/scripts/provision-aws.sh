@@ -108,6 +108,29 @@ done
 echo "  Aguardando propagação do IAM (10s)..."
 sleep 10
 
+# Gera e armazena a API Key no Secrets Manager (idempotente)
+SECRET_NAME="provvi/api-key/${ENV}"
+echo "  Verificando secret: ${SECRET_NAME}"
+if aws secretsmanager describe-secret \
+        --secret-id "${SECRET_NAME}" \
+        --region "${REGION}" &>/dev/null; then
+    echo "  ✓ Secret já existe: ${SECRET_NAME}"
+    API_KEY=$(aws secretsmanager get-secret-value \
+        --secret-id "${SECRET_NAME}" \
+        --region "${REGION}" \
+        --query 'SecretString' --output text)
+else
+    echo "  Criando secret ${SECRET_NAME}..."
+    API_KEY=$(openssl rand -hex 32)
+    aws secretsmanager create-secret \
+        --name "${SECRET_NAME}" \
+        --description "API Key Provvi SDK - ambiente ${ENV}" \
+        --secret-string "${API_KEY}" \
+        --region "${REGION}" \
+        --output text --query 'ARN' \
+        | xargs -I{} echo "  Secret criado: {}"
+fi
+
 # ---------------------------------------------------------------------------
 # Etapa 2 — S3 Bucket
 # Armazena imagens JPEG e manifestos C2PA de cada sessão de vistoria.
@@ -202,6 +225,7 @@ echo "  Fazendo deploy..."
     --iam-role "${ROLE_ARN}" \
     --env-var "S3_BUCKET=${BUCKET_NAME}" \
     --env-var "DYNAMODB_TABLE=${TABLE_NAME}" \
+    --env-var "API_KEY=${API_KEY}" \
     "${FUNCTION_NAME}")
 echo "  ✓ Deploy concluído."
 

@@ -3,81 +3,65 @@
 
 package br.com.provvi.assertions
 
-/**
- * Tipos de aula para o domínio HabilitAi.
- * Indica a modalidade da atividade sendo registrada pela captura.
- */
-enum class HabilitAiLessonType {
-    AULA_PRATICA,  // Aula prática de direção em via pública ou pista
-    AULA_TEORICA,  // Aula teórica em sala ou plataforma digital
-    EXAME          // Exame de habilitação prático ou teórico
-}
+import org.json.JSONObject
 
 /**
- * Tipos de evento de registro para o domínio HabilitAi.
- * Determina o propósito da foto dentro do fluxo da autoescola.
+ * Asserções específicas do HabilitAi para registro em manifesto C2PA.
+ *
+ * Cada captura no HabilitAi representa um evento de biometria ou odômetro
+ * dentro de uma aula prática de habilitação.
+ *
+ * @param classId   Identificador único da aula prática.
+ * @param deviceId  Identificador do dispositivo utilizado.
+ * @param event     Tipo do evento biométrico ou de odômetro.
  */
-enum class HabilitAiEventType {
-    INICIO_AULA,    // Foto no início da aula — registro de presença do aluno
-    FIM_AULA,       // Foto no fim da aula — confirmação de conclusão
-    FOTO_ODOMETRO,  // Foto do odômetro para registro de quilometragem
-    FOTO_VEICULO    // Foto geral do veículo para inspeção de estado
-}
-
-/**
- * Asserções específicas para o cliente HabilitAi — autoescola digital.
- *
- * Este arquivo é entregue diretamente ao integrador HabilitAi e incluído
- * no projeto da aplicação host. Nunca é compilado dentro do `provvi-sdk.aar`.
- *
- * O SDK recebe uma instância desta classe via [br.com.provvi.ProvviCapture.capture]
- * através da interface [ProvviAssertions] — o .aar não conhece este tipo em tempo
- * de compilação, apenas o contrato da interface.
- *
- * @param instructorId          ID do instrutor responsável pela aula.
- * @param studentId             ID do aluno sendo instruído.
- * @param lessonType            Modalidade da atividade ([HabilitAiLessonType]).
- * @param vehiclePlate          Placa do veículo utilizado na aula.
- * @param odometerKm            Quilometragem registrada no odômetro. Opcional.
- * @param registrationEventType Tipo de evento de registro ([HabilitAiEventType]).
- */
-data class HabilitAiAssertions(
-    val instructorId:          String,
-    val studentId:             String,
-    val lessonType:            HabilitAiLessonType,
-    val vehiclePlate:          String,
-    val odometerKm:            Int?                 = null,
-    val registrationEventType: HabilitAiEventType
+class HabilitAiAssertions(
+    private val classId:  String,
+    private val deviceId: String,
+    private val event:    HabilitAiEvent
 ) : ProvviAssertions {
 
-    init {
-        // Campos obrigatórios pelo schema HabilitAi — validados na construção do objeto
-        // para garantir que nenhuma captura seja iniciada com identificadores inválidos
-        require(instructorId.isNotBlank()) {
-            "instructorId não pode ser vazio — identifique o instrutor antes de iniciar a captura"
-        }
-        require(studentId.isNotBlank()) {
-            "studentId não pode ser vazio — identifique o aluno antes de iniciar a captura"
-        }
-        require(vehiclePlate.isNotBlank()) {
-            "vehiclePlate não pode ser vazio — informe a placa do veículo antes de iniciar a captura"
-        }
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("domain",    "habilitai")
+        put("class_id",  classId)
+        put("device_id", deviceId)
+        put("event",     event.code)
+        put("event_description", event.description)
     }
 
-    /**
-     * Retorna o mapa de asserções em snake_case, omitindo campos nulos.
-     *
-     * As chaves seguem o padrão de nomenclatura do domínio HabilitAi para
-     * rastreabilidade nos relatórios de conformidade da autoescola.
-     */
-    override fun toMap(): Map<String, Any> = buildMap {
-        put("instructor_id",           instructorId)
-        put("student_id",              studentId)
-        put("lesson_type",             lessonType.name)
-        put("vehicle_plate",           vehiclePlate)
-        put("registration_event_type", registrationEventType.name)
+    fun label(): String = "com.habilitai.capture"
 
-        // Odômetro omitido do mapa quando não informado
-        odometerKm?.let { put("odometer_km", it) }
-    }
+    // Satisfaz o contrato da interface ProvviAssertions — delega para toJson()
+    override fun toMap(): Map<String, Any> = mapOf(
+        "domain"            to "habilitai",
+        "class_id"          to classId,
+        "device_id"         to deviceId,
+        "event"             to event.code,
+        "event_description" to event.description
+    )
+}
+
+/**
+ * Eventos registráveis pelo HabilitAi.
+ * Cada evento tem um código curto (armazenado no manifesto) e uma descrição PT-BR.
+ */
+enum class HabilitAiEvent(val code: String, val description: String) {
+
+    /** Biometria facial do aluno no início da aula */
+    STUDENT_START_BIOMETRY("student_start_biometry", "Biometria de início do aluno"),
+
+    /** Biometria facial do instrutor no início da aula */
+    INSTRUCTOR_START_BIOMETRY("instructor_start_biometry", "Biometria de início do instrutor"),
+
+    /** Biometria facial do aluno no fim da aula */
+    STUDENT_END_BIOMETRY("student_end_biometry", "Biometria de fim do aluno"),
+
+    /** Biometria facial do instrutor no fim da aula */
+    INSTRUCTOR_END_BIOMETRY("instructor_end_biometry", "Biometria de fim do instrutor"),
+
+    /** Registro fotográfico do odômetro no início da aula */
+    ODOMETER_START("odometer_start", "Odômetro início"),
+
+    /** Registro fotográfico do odômetro no fim da aula */
+    ODOMETER_END("odometer_end", "Odômetro fim");
 }

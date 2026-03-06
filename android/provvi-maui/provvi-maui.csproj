@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-android</TargetFramework>
+    <RootNamespace>Provvi.Maui</RootNamespace>
+    <AssemblyName>Provvi.Maui</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Binding library — não gera APK, apenas DLL -->
+    <OutputType>Library</OutputType>
+    <IsBindingProject>false</IsBindingProject>
+  </PropertyGroup>
+
+  <!-- AAR do SDK Provvi — referenciado diretamente sem binding automático -->
+  <ItemGroup>
+    <AndroidLibrary Include="libs/provvi-sdk-release.aar" Bind="false" />
+  </ItemGroup>
+
+  <!-- Dependências transitivas do SDK Kotlin -->
+  <ItemGroup>
+    <PackageReference Include="Xamarin.AndroidX.Camera.Camera2" Version="1.3.1" />
+    <PackageReference Include="Xamarin.AndroidX.Camera.Lifecycle" Version="1.3.1" />
+    <PackageReference Include="Xamarin.GooglePlayServices.Integrity" Version="17.0.1" />
+    <PackageReference Include="Square.OkHttp3" Version="4.12.0" />
+  </ItemGroup>
+
+</Project>

@@ -27,6 +27,7 @@ import br.com.provvi.security.IntegrityResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
@@ -449,6 +450,27 @@ class ProvviCapture(context: Context) {
         })
 
         return CaptureOutcome.Success(session)
+    }
+
+    /**
+     * Versão bloqueante de [capture] para uso por chamadores não-coroutine
+     * (Java, C#/MAUI via JNI, scripts de teste).
+     *
+     * Bloqueia a thread chamadora até o pipeline completar.
+     * NÃO chame da Main thread — use uma thread de background.
+     *
+     * @param lifecycleOwner Lifecycle a ser usado pelo CameraX.
+     * @param assertions     Asserções de negócio do integrador.
+     * @param backendClient  Cliente de upload opcional.
+     * @return [CaptureOutcome] com o resultado do pipeline.
+     */
+    @JvmOverloads
+    fun captureBlocking(
+        lifecycleOwner: LifecycleOwner,
+        assertions:     ProvviAssertions,
+        backendClient:  ProvviBackendClient? = null
+    ): CaptureOutcome = runBlocking {
+        capture(lifecycleOwner, assertions, backendClient)
     }
 
     /**
