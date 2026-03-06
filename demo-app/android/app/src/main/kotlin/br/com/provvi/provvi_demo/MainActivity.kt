@@ -21,12 +21,18 @@ class MainActivity : FlutterActivity() {
     private val CHANNEL = "br.com.provvi/sdk"
     private val PERMISSIONS_REQUEST_CODE = 100
     private lateinit var provviCapture: ProvviCapture
+    private lateinit var backendClient: br.com.provvi.backend.ProvviBackendClient
     private var pendingResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
         provviCapture = ProvviCapture(this)
+        backendClient = br.com.provvi.backend.ProvviBackendClient(
+            br.com.provvi.backend.BackendConfig(
+                lambdaUrl = "https://3nw6hxeumaqhtkrtghjtkzyamq0sojrk.lambda-url.sa-east-1.on.aws/"
+            )
+        )
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -64,7 +70,8 @@ class MainActivity : FlutterActivity() {
                 assertions = GenericAssertions(
                     capturedBy  = capturedBy,
                     referenceId = referenceId
-                )
+                ),
+                backendClient = backendClient
             )
 
             when (outcome) {
@@ -76,7 +83,8 @@ class MainActivity : FlutterActivity() {
                         "frameHashHex"         to session.frameHashHex,
                         "locationSuspicious"   to session.locationSuspicious,
                         "capturedAtNanos"      to session.capturedAtNanos,
-                        "hasIntegrityToken"    to session.deviceIntegrityToken.isNotEmpty()
+                        "hasIntegrityToken"    to session.deviceIntegrityToken.isNotEmpty(),
+                        "manifestUrl"          to (session.manifestUrl ?: "")
                     ))
                 }
                 is br.com.provvi.CaptureOutcome.SigningFailed ->

@@ -276,6 +276,7 @@ class _ResultCard extends StatelessWidget {
 
     final locationSuspicious = session['locationSuspicious'] as bool? ?? false;
     final hasIntegrityToken  = session['hasIntegrityToken']  as bool? ?? false;
+    final manifestUrl        = session['manifestUrl']        as String? ?? '';
 
     return Card(
       elevation: 2,
@@ -300,6 +301,12 @@ class _ResultCard extends StatelessWidget {
             _Campo(
               label: 'Play Integrity',
               value: hasIntegrityToken ? '✅ Token presente' : '❌ Indisponível',
+            ),
+            _Campo(
+              label: 'Manifest URL',
+              value: manifestUrl.isNotEmpty
+                  ? '${manifestUrl.substring(0, manifestUrl.length > 40 ? 40 : manifestUrl.length)}...'
+                  : '❌ Não sincronizado',
             ),
             const SizedBox(height: 16),
             SizedBox(

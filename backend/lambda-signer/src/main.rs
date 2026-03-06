@@ -9,20 +9,24 @@ use tracing::info;
 // Tipos de entrada e saída da Lambda
 // ---------------------------------------------------------------------------
 
-/// Payload enviado pelo SDK Android após captura local
+/// Envelope da Function URL — o body pode vir como string JSON ou direto
+#[derive(Deserialize, Serialize)]
+struct FunctionUrlEvent {
+    body: Option<String>,
+    #[serde(rename = "isBase64Encoded")]
+    is_base64_encoded: Option<bool>,
+    // Campos diretos para invocação via CLI (sem envelope)
+    session_id: Option<String>,
+}
+
+/// Payload real da requisição
 #[derive(Deserialize)]
 struct SignRequest {
-    /// UUID da sessão gerado no dispositivo
     session_id: String,
-    /// Imagem JPEG em base64
     image_base64: String,
-    /// Manifesto C2PA gerado pelo SDK (assinado com cert dev)
     manifest_json: String,
-    /// Hash SHA-256 do frame YUV original
     frame_hash_hex: String,
-    /// Timestamp do sensor em nanosegundos
     captured_at_nanos: i64,
-    /// Asserções de negócio do integrador
     assertions: serde_json::Value,
 }
 
@@ -51,9 +55,24 @@ struct ErrorResponse {
 // ---------------------------------------------------------------------------
 
 async fn handler(
-    event: LambdaEvent<SignRequest>,
+    event: LambdaEvent<FunctionUrlEvent>,
 ) -> Result<SignResponse, Error> {
-    let req = event.payload;
+    // Extrai o SignRequest do envelope Function URL ou do payload direto CLI
+    let req: SignRequest = if let Some(body) = event.payload.body {
+        let decoded = if event.payload.is_base64_encoded.unwrap_or(false) {
+            String::from_utf8(
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &body)?
+            )?
+        } else {
+            body
+        };
+        serde_json::from_str(&decoded)
+            .map_err(|e| format!("Falha ao desserializar body: {e}"))?
+    } else {
+        // Invocação direta via CLI — deserializa o evento inteiro
+        serde_json::from_value(serde_json::to_value(event.payload)?)
+            .map_err(|e| format!("Falha ao desserializar payload direto: {e}"))?
+    };
 
     info!(
         session_id = %req.session_id,
