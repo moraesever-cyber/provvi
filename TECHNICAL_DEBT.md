@@ -232,3 +232,81 @@ público não consegue verificar sem um serviço intermediário.
 
 **Dependências:**
 - DT-003: certificado de produção ICP-Brasil para validade jurídica plena
+
+## DT-010 — Validação do Wrapper MAUI em Dispositivo Real
+**Prioridade:** Alta | **Status:** Pendente | **Registrado:** 2026-03-06
+
+**Problema:**
+O wrapper MAUI foi escrito e revisado mas ainda não foi compilado nem testado
+em dispositivo físico. A invocação JNI é feita manualmente — erros de descritor,
+nome de método ou assinatura só aparecem em runtime.
+
+**Riscos específicos:**
+- Descritor JNI de `captureBlocking()` pode divergir do bytecode Kotlin gerado
+- `ProcessLifecycleOwner.get()` pode não estar disponível no contexto MAUI
+- `HasIntegrityToken` não está sendo extraído em `ExtractSuccess()` — campo ausente
+- `PipelineTimingsMs` não está sendo extraído — campo ausente
+
+**Plano de validação:**
+1. Criar app MAUI mínimo de teste (`maui-test-app/`) com uma tela e um botão
+2. Referenciar `provvi-maui.csproj`
+3. Chamar `CaptureHabilitAiAsync()` com evento `STUDENT_START_BIOMETRY`
+4. Verificar que retorna `ProvviCaptureResult` com `SessionId` preenchido
+5. Verificar no DynamoDB que a sessão foi registrada com asserções HabilitAi
+
+**Bloqueio:**
+Requer ambiente .NET MAUI Android configurado com workload Android instalado.
+O dev do HabilitAi pode executar este plano com o ambiente dele.
+
+**Campos pendentes em `ExtractSuccess()`:**
+- `HasIntegrityToken` — getter: `getHasIntegrityToken()`, tipo: `bool`
+- `PipelineTimingsMs` — getter: `getPipelineTimingsMs()`, tipo: `Map<String, Long>?`
+
+## DT-011 — Upload Assíncrono (Background Sync)
+**Prioridade:** Alta | **Status:** Pendente | **Registrado:** 2026-03-06
+
+**Decisão:** Upload para o backend deve ser assíncrono — não bloquear a UI
+após a captura local completar.
+
+**Fluxo alvo:**
+1. SDK captura + hash + assina localmente → retorna para o app (~3.5s)
+2. App libera UI imediatamente
+3. Upload acontece em background via WorkManager
+4. Notificação silenciosa quando sincronizado
+
+**Impacto:**
+- Tempo percebido pelo usuário: 12s → 3.5s (captura local apenas)
+- backend_upload_ms some dos timings visíveis ao usuário
+- Habilita naturalmente o fluxo offline-first (DT-006)
+
+**Dependências:**
+- DT-006 (offline-first) — implementar juntos
+- DT-003 (assinatura KMS no backend) — upload assíncrono é pré-requisito
+  para assinatura backend não bloquear UI
+
+---
+
+## DT-012 — Migração Assinatura C2PA para Backend (KMS)
+**Prioridade:** Alta | **Status:** Em implementação | **Registrado:** 2026-03-06
+
+**Decisão arquitetural:**
+Manter assinatura local com cert dev como fallback de integridade.
+Assinatura com validade jurídica plena migra para backend via AWS KMS.
+
+**Fluxo alvo:**
+- Dispositivo: captura → hash → manifesto → assina com cert dev (fallback)
+- Backend: recebe manifesto → re-assina com cert ICP-Brasil via KMS
+- Manifesto final: duas assinaturas — local (integridade) + backend (jurídica)
+
+**O que muda na Lambda:**
+- Recebe manifesto com assinatura local
+- Adiciona segunda assinatura via AWS KMS
+- Armazena manifesto duplamente assinado no S3
+
+**Bloqueio atual:**
+Certificado ICP-Brasil pendente — CNPJ ME sendo atualizado para nome
+fantasia Provvi. Implementar estrutura KMS agora, plugar certificado depois.
+
+**Meta de produto:**
+Site com validador de integridade público — visitante faz upload de imagem
+capturada pelo Provvi e recebe confirmação de autenticidade com cadeia de custódia.
