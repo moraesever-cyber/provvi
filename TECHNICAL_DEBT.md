@@ -310,3 +310,36 @@ fantasia Provvi. Implementar estrutura KMS agora, plugar certificado depois.
 **Meta de produto:**
 Site com validador de integridade público — visitante faz upload de imagem
 capturada pelo Provvi e recebe confirmação de autenticidade com cadeia de custódia.
+
+## DT-013 — Remover Assinatura Local como Padrão (pós cert ICP-Brasil)
+**Prioridade:** Média | **Status:** Pendente | **Registrado:** 2026-03-06
+
+**Contexto:**
+Hoje o SDK Android assina o manifesto com cert dev Ed25519 sempre — online e offline.
+A assinatura KMS no backend é uma segunda assinatura independente.
+Essa arquitetura é correta para a fase atual (cert dev + KMS sem cert ICP-Brasil).
+
+**Decisão pendente:**
+Quando o certificado ICP-Brasil estiver configurado no KMS, alterar o SDK para:
+
+- Online:  dispositivo gera hash + manifesto → envia sem assinar → Lambda assina com cert ICP-Brasil
+- Offline: dispositivo assina com cert dev como fallback → re-assina via KMS quando sincronizar
+
+**Fluxo alvo:**
+1. SDK verifica conectividade antes de capturar
+2. Com conectividade: não assina localmente, faz upload imediato
+3. Sem conectividade: assina com cert dev, enfileira para sync (DT-011)
+4. Ao sincronizar: Lambda re-assina com KMS, grava kms_signed=true
+
+**O que muda no SDK Android:**
+- ProvviCapture.kt: assinatura local condicional (só se offline)
+- CaptureSession: campo signing_mode: "local_fallback" | "kms_backend"
+- BackendClient: indicar no payload se a assinatura local é definitiva ou fallback
+
+**Dependências:**
+- DT-003: certificado ICP-Brasil plugado no KMS (pré-requisito)
+- DT-011: upload assíncrono + fila offline (implementar junto)
+
+**Não fazer antes de:**
+DT-003 resolvido — sem cert ICP-Brasil no KMS, a assinatura local
+com cert dev continua sendo a única com integridade verificável.
