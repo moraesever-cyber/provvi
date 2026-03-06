@@ -6,6 +6,9 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
@@ -72,7 +75,7 @@ sealed class LocationValidationOutcome {
 class LocationValidator(private val context: Context) {
 
     // Timeout individual para cada fonte de localização
-    private val sourceTimeoutMillis = 5_000L
+    private val sourceTimeoutMillis = 3_000L
 
     // Limiar de divergência entre fontes definido no ADR-001 (camada 3.5)
     private val divergenceThresholdMeters = 500f
@@ -94,9 +97,16 @@ class LocationValidator(private val context: Context) {
         val manager = locationManager
             ?: return LocationValidationOutcome.LocationUnavailable
 
-        // Consulta ambas as fontes com timeout — cada chamada é independente
-        val gpsLocation     = requestLocation(manager, LocationManager.GPS_PROVIDER)
-        val networkLocation = requestLocation(manager, LocationManager.NETWORK_PROVIDER)
+        // Paralelize GPS e NETWORK — ambos independentes entre si
+        val (gpsLocation, networkLocation) = coroutineScope {
+            val gpsDeferred = async(Dispatchers.IO) {
+                requestLocation(manager, LocationManager.GPS_PROVIDER)
+            }
+            val networkDeferred = async(Dispatchers.IO) {
+                requestLocation(manager, LocationManager.NETWORK_PROVIDER)
+            }
+            Pair(gpsDeferred.await(), networkDeferred.await())
+        }
 
         // Nenhuma fonte respondeu dentro do timeout
         if (gpsLocation == null && networkLocation == null) {

@@ -24,6 +24,10 @@ import br.com.provvi.recapture.RecaptureIndicator
 import br.com.provvi.security.DeviceIntegrityChecker
 import br.com.provvi.security.DeviceVerdict
 import br.com.provvi.security.IntegrityResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
@@ -58,7 +62,9 @@ data class CaptureSession(
     val locationSuspicious: Boolean,
     val deviceIntegrityToken: String,
     val capturedAtNanos: Long,
-    val manifestUrl: String? = null
+    val manifestUrl: String? = null,
+    /** Tempo gasto em cada camada do pipeline, em milissegundos (DT-001). */
+    val pipelineTimingsMs: Map<String, Long>? = null
 ) {
     // Gerado — necessário para data class com ByteArray
     override fun equals(other: Any?): Boolean {
@@ -71,7 +77,8 @@ data class CaptureSession(
                locationSuspicious == other.locationSuspicious &&
                deviceIntegrityToken == other.deviceIntegrityToken &&
                capturedAtNanos == other.capturedAtNanos &&
-               manifestUrl == other.manifestUrl
+               manifestUrl == other.manifestUrl &&
+               pipelineTimingsMs == other.pipelineTimingsMs
     }
 
     override fun hashCode(): Int {
@@ -83,6 +90,7 @@ data class CaptureSession(
         result = 31 * result + deviceIntegrityToken.hashCode()
         result = 31 * result + capturedAtNanos.hashCode()
         result = 31 * result + manifestUrl.hashCode()
+        result = 31 * result + pipelineTimingsMs.hashCode()
         return result
     }
 }
@@ -165,19 +173,69 @@ class ProvviCapture(context: Context) {
         // para vincular o token ao contexto desta captura específica
         val sessionId = UUID.randomUUID().toString()
 
+        // Marcador de tempo global do pipeline (DT-001)
+        val totalStart = System.nanoTime()
+
         // -----------------------------------------------------------------
-        // Camada 2: Integridade do dispositivo (Play Integrity API)
-        // Executa antes da câmera para bloquear dispositivos comprometidos
-        // o mais cedo possível no pipeline.
+        // Camadas 2, 3.5 e 1+3 em paralelo
+        //
+        // Play Integrity e localização rodam em IO (chamadas de rede/sensor).
+        // A câmera inicia na Main (CameraX exige Main para bindToLifecycle).
+        // coroutineScope garante que todos os filhos concluam (ou falhem juntos)
+        // antes de prosseguir — early-returns são tratados fora do escopo.
+        // -----------------------------------------------------------------
+        val tParallel = System.nanoTime()
+
+        val parallelOutput = coroutineScope {
+            val integrityDeferred = async(Dispatchers.Default) {
+                val t = System.nanoTime()
+                val result = integrityChecker.check(nonce = sessionId)
+                Pair(result, (System.nanoTime() - t) / 1_000_000L)
+            }
+
+            val locationDeferred = async(Dispatchers.IO) {
+                val t = System.nanoTime()
+                val result = locationValidator.validate()
+                Pair(result, (System.nanoTime() - t) / 1_000_000L)
+            }
+
+            val frameDeferred = async(Dispatchers.Main) {
+                val t = System.nanoTime()
+                val channel = Channel<CaptureResult>(Channel.RENDEZVOUS)
+                cameraCapture.startCapture(lifecycleOwner) { result ->
+                    // Callback executa no analysisExecutor (thread não-coroutine).
+                    // trySend é não-bloqueante: retorna falha silenciosa se nenhum
+                    // receiver estiver aguardando (frames subsequentes ao primeiro).
+                    channel.trySend(result)
+                }
+                // Aguarda o primeiro frame com timeout de 10 segundos
+                val frame = withTimeoutOrNull(10_000L) { channel.receive() }
+                Triple(frame, channel, (System.nanoTime() - t) / 1_000_000L)
+            }
+
+            Triple(integrityDeferred.await(), locationDeferred.await(), frameDeferred.await())
+        }
+
+        val (integrityResult, integrityCheckMs)     = parallelOutput.first
+        val (locationOutcome, locationValidationMs) = parallelOutput.second
+        val (firstFrame, frameChannel, cameraFrameMs) = parallelOutput.third
+
+        val parallelMs = (System.nanoTime() - tParallel) / 1_000_000L
+
+        // -----------------------------------------------------------------
+        // Pós-processamento do resultado de integridade (Camada 2).
+        // A câmera já iniciou em paralelo — cleanup necessário em caso de bloqueio.
         // -----------------------------------------------------------------
         var deviceVerdict: DeviceVerdict? = null
         var integrityToken = ""
 
-        when (val integrityResult = integrityChecker.check(nonce = sessionId)) {
+        when (integrityResult) {
             is IntegrityResult.Verified -> {
                 // meetsBasicIntegrity = false indica root, emulador modificado ou
                 // manipulação de software — captura bloqueada conforme ADR-001
                 if (!integrityResult.verdict.meetsBasicIntegrity) {
+                    cameraCapture.stopCapture()
+                    frameChannel.close()
                     return CaptureOutcome.DeviceCompromised
                 }
                 deviceVerdict  = integrityResult.verdict
@@ -191,39 +249,26 @@ class ProvviCapture(context: Context) {
         }
 
         // -----------------------------------------------------------------
-        // Camada 3.5: Validação de localização multi-fonte
-        // GPS + NETWORK; divergência > 500 m → locationSuspicious = true.
-        // Mock detectado → captura bloqueada.
+        // Pós-processamento do resultado de localização (Camada 3.5).
+        // Mock detectado → bloqueia captura e libera câmera já iniciada.
         // -----------------------------------------------------------------
         var locationResult: LocationResult? = null
 
-        when (val locationOutcome = locationValidator.validate()) {
+        when (locationOutcome) {
             is LocationValidationOutcome.Valid        -> locationResult = locationOutcome.result
-            is LocationValidationOutcome.MockDetected -> return CaptureOutcome.MockLocationDetected
+            is LocationValidationOutcome.MockDetected -> {
+                cameraCapture.stopCapture()
+                frameChannel.close()
+                return CaptureOutcome.MockLocationDetected
+            }
             LocationValidationOutcome.LocationUnavailable -> {
                 // Nenhuma fonte respondeu: continua sem GPS; registrado no manifesto
             }
         }
 
         // -----------------------------------------------------------------
-        // Camadas 1 + 3: Câmera exclusiva + hash pré-codec
-        //
-        // Canal RENDEZVOUS: entrega direta do primeiro frame para esta coroutine.
-        // trySend() só tem sucesso quando receive() está aguardando — garante que
-        // apenas o primeiro frame seja consumido e os subsequentes descartados.
+        // Pós-processamento do frame de câmera (Camadas 1+3).
         // -----------------------------------------------------------------
-        val frameChannel = Channel<CaptureResult>(Channel.RENDEZVOUS)
-
-        cameraCapture.startCapture(lifecycleOwner) { result ->
-            // Callback executa no analysisExecutor (thread não-coroutine).
-            // trySend é não-bloqueante: retorna falha silenciosa se nenhum
-            // receiver estiver aguardando (frames subsequentes ao primeiro).
-            frameChannel.trySend(result)
-        }
-
-        // Aguarda o primeiro frame com timeout de 10 segundos
-        val firstFrame = withTimeoutOrNull(10_000L) { frameChannel.receive() }
-
         if (firstFrame == null) {
             // Timeout: câmera não entregou nenhum frame no prazo esperado
             cameraCapture.stopCapture()
@@ -252,7 +297,11 @@ class ProvviCapture(context: Context) {
         // (a sessão Camera2 ainda está aberta). Captura suspeita é bloqueada aqui —
         // o frame não é convertido nem assinado, reduzindo superfície de ataque.
         // -----------------------------------------------------------------
-        val recaptureAnalysis = RecaptureDetector.analyze(successFrame.imageProxy)
+        val t0Recapture = System.nanoTime()
+        val recaptureAnalysis = withContext(Dispatchers.Default) {
+            RecaptureDetector.analyze(successFrame.imageProxy)
+        }
+        val recaptureAnalysisMs = (System.nanoTime() - t0Recapture) / 1_000_000L
 
         if (recaptureAnalysis is RecaptureAnalysis.Suspicious) {
             // Libera recursos antes de retornar — mesma sequência do caminho de erro normal
@@ -266,7 +315,11 @@ class ProvviCapture(context: Context) {
         }
 
         // Converte o frame YUV_420_888 para JPEG antes de liberar a sessão de câmera
-        val jpegBytes = yuvToJpeg(successFrame.imageProxy)
+        val t0Jpeg = System.nanoTime()
+        val jpegBytes = withContext(Dispatchers.Default) {
+            yuvToJpeg(successFrame.imageProxy)
+        }
+        val jpegConversionMs = (System.nanoTime() - t0Jpeg) / 1_000_000L
 
         // Libera o buffer do frame de volta ao pool da câmera
         successFrame.imageProxy.close()
@@ -309,13 +362,26 @@ class ProvviCapture(context: Context) {
 
             // Asserções do integrador — convertidas via ProvviAssertions.toMap()
             putAll(assertions.toMap())
+
+            // DT-001: timings das camadas anteriores à assinatura (c2pa + backend não disponíveis aqui)
+            put("pipeline_timings_ms", mapOf(
+                "parallel_total_ms"      to parallelMs,
+                "integrity_check_ms"     to integrityCheckMs,
+                "location_validation_ms" to locationValidationMs,
+                "camera_frame_ms"        to cameraFrameMs,
+                "recapture_analysis_ms"  to recaptureAnalysisMs,
+                "jpeg_conversion_ms"     to jpegConversionMs
+            ))
         }
 
         // -----------------------------------------------------------------
         // Camada 4: Assinatura C2PA via c2pa-rs (Rust JNI)
         // O manifesto é assinado com Ed25519 (dev) ou ICP-Brasil (produção).
         // -----------------------------------------------------------------
+        val t0Signing = System.nanoTime()
         val signingResult = c2paEngine.sign(jpegBytes, allAssertions)
+
+        val c2paSigningMs = (System.nanoTime() - t0Signing) / 1_000_000L
 
         if (signingResult is C2paResult.Error) {
             return CaptureOutcome.SigningFailed(signingResult.message)
@@ -342,7 +408,9 @@ class ProvviCapture(context: Context) {
         // o integrador recebe a sessão assinada com manifestUrl = null e
         // pode implementar retry próprio se necessário.
         // -----------------------------------------------------------------
+        var backendUploadMs = 0L
         if (backendClient != null) {
+            val t0Upload = System.nanoTime()
             when (val uploadResult = backendClient.upload(session)) {
                 is BackendResult.Success -> {
                     // Enriquece a sessão com a URL presigned do S3
@@ -356,7 +424,29 @@ class ProvviCapture(context: Context) {
                     )
                 }
             }
+            backendUploadMs = (System.nanoTime() - t0Upload) / 1_000_000L
         }
+
+        val totalMs = (System.nanoTime() - totalStart) / 1_000_000L
+
+        // Mapa completo de timings incluído na sessão para observabilidade (DT-001)
+        val timings = mapOf(
+            "parallel_total_ms"      to parallelMs,
+            "integrity_check_ms"     to integrityCheckMs,
+            "location_validation_ms" to locationValidationMs,
+            "camera_frame_ms"        to cameraFrameMs,
+            "recapture_analysis_ms"  to recaptureAnalysisMs,
+            "jpeg_conversion_ms"     to jpegConversionMs,
+            "c2pa_signing_ms"        to c2paSigningMs,
+            "backend_upload_ms"      to backendUploadMs,
+            "total_ms"               to totalMs
+        )
+        session = session.copy(pipelineTimingsMs = timings)
+
+        android.util.Log.i("ProvviPerf", buildString {
+            append("=== Pipeline Timings ===\n")
+            timings.forEach { (k, v) -> append("  $k: ${v}ms\n") }
+        })
 
         return CaptureOutcome.Success(session)
     }

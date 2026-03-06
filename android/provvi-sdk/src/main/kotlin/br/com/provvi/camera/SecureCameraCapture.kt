@@ -13,7 +13,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import br.com.provvi.crypto.FrameHash
 import br.com.provvi.crypto.FrameHasher
+import android.util.Log
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 
@@ -44,8 +46,9 @@ enum class CaptureError {
 @androidx.camera.camera2.interop.ExperimentalCamera2Interop
 class SecureCameraCapture(private val context: Context) {
 
-    // Executor dedicado para análise de frames, isolado do thread principal
-    private val analysisExecutor = Executors.newSingleThreadExecutor()
+    // Executor dedicado para análise de frames, isolado do thread principal.
+    // Declarado como var para permitir recriação após shutdown entre capturas.
+    private var analysisExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
     // Referências mantidas para liberar recursos corretamente no stopCapture()
     private var cameraProvider: ProcessCameraProvider? = null
@@ -105,6 +108,17 @@ class SecureCameraCapture(private val context: Context) {
         lifecycleOwner: LifecycleOwner,
         onFrameCaptured: (CaptureResult) -> Unit
     ) {
+        // Encerra sessão ativa anterior se existir — garante estado limpo
+        if (cameraProvider != null) {
+            Log.w("CameraCapture", "startCapture() chamado com sessão ativa — forçando encerramento")
+            stopCapture()
+        }
+
+        // Recria o executor se tiver sido encerrado por uma captura anterior
+        if (analysisExecutor.isShutdown) {
+            analysisExecutor = Executors.newSingleThreadExecutor()
+        }
+
         // Valida hardware antes de qualquer acesso ao sistema de câmera
         if (!hasPhysicalCamera()) {
             onFrameCaptured(CaptureResult.Error(CaptureError.NO_CAMERA))

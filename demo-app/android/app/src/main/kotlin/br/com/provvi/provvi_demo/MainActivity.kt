@@ -84,7 +84,8 @@ class MainActivity : FlutterActivity() {
                         "locationSuspicious"   to session.locationSuspicious,
                         "capturedAtNanos"      to session.capturedAtNanos,
                         "hasIntegrityToken"    to session.deviceIntegrityToken.isNotEmpty(),
-                        "manifestUrl"          to (session.manifestUrl ?: "")
+                        "manifestUrl"          to (session.manifestUrl ?: ""),
+                        "pipelineTimings"      to (session.pipelineTimingsMs ?: emptyMap<String, Long>())
                     ))
                 }
                 is br.com.provvi.CaptureOutcome.SigningFailed ->

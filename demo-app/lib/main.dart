@@ -219,6 +219,11 @@ class _CaptureScreenState extends State<CaptureScreen> {
               session: _lastSession!,
               onVerManifesto: _verManifesto,
             ),
+
+            if (_lastSession != null) ...[
+              const SizedBox(height: 16),
+              _TimingsCard(session: _lastSession!),
+            ],
           ],
         ),
       ),
@@ -317,6 +322,98 @@ class _ResultCard extends StatelessWidget {
                 label: const Text('Ver Manifesto Completo'),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Card com os tempos de cada camada do pipeline Provvi
+class _TimingsCard extends StatelessWidget {
+  const _TimingsCard({required this.session});
+
+  final Map<String, dynamic> session;
+
+  @override
+  Widget build(BuildContext context) {
+    final raw = session['pipelineTimings'];
+    if (raw == null || raw is! Map) return const SizedBox.shrink();
+
+    final timings = Map<String, int>.fromEntries(
+      raw.entries
+          .where((e) => e.value is int)
+          .map((e) => MapEntry(e.key as String, e.value as int)),
+    );
+
+    if (timings.isEmpty) return const SizedBox.shrink();
+
+    // Labels legíveis para cada chave do mapa
+    const labels = <String, String>{
+      'integrity_check_ms':     'Play Integrity',
+      'location_validation_ms': 'Localização',
+      'camera_frame_ms':        'Câmera',
+      'recapture_analysis_ms':  'Anti-recaptura',
+      'jpeg_conversion_ms':     'JPEG',
+      'c2pa_signing_ms':        'Assinatura C2PA',
+      'backend_upload_ms':      'Upload backend',
+      'total_ms':               'TOTAL',
+    };
+
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Tempos do pipeline',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const Divider(height: 24),
+            ...labels.entries
+                .where((e) => timings.containsKey(e.key))
+                .map((e) {
+                  final ms = timings[e.key]!;
+                  final isTotal = e.key == 'total_ms';
+                  Color valueColor;
+                  if (ms > 1000) {
+                    valueColor = Colors.red.shade700;
+                  } else if (ms <= 500) {
+                    valueColor = Colors.green.shade700;
+                  } else {
+                    valueColor = Colors.orange.shade800;
+                  }
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 140,
+                          child: Text(
+                            e.value,
+                            style: TextStyle(
+                              color: Colors.grey,
+                              fontSize: 13,
+                              fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '${ms}ms',
+                          style: TextStyle(
+                            color: valueColor,
+                            fontSize: 13,
+                            fontWeight: isTotal ? FontWeight.bold : FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
           ],
         ),
       ),
