@@ -58,21 +58,24 @@ Requer publicação do app na Play Store (mesmo em internal testing).
 
 ---
 
-## DT-003 — Certificados de Desenvolvimento C2PA
-**Prioridade:** Alta | **Status:** Pendente | **Registrado:** 2026-03-06
+## DT-003 — Certificados C2PA de Desenvolvimento
+**Prioridade:** Alta | **Status:** Em andamento | **Atualizado:** 2026-03-06
 
-**Problema:**
-Certificado Ed25519 autoassinado (CA:FALSE, CN=Provvi Dev) usado em desenvolvimento.
-Não está na CAI Trust List — `signingCredential.untrusted` em toda verificação externa.
+**Decisão:**
+Usar certificado ICP-Brasil emitido para o CNPJ da ME
+(EVERALDO ARISTOTELES DE MORAES ME) como solução de curto prazo.
+Nome fantasia não consta no certificado — razão social aparece no carimbo.
+Aceitável para fase de demonstração: o que importa é kms_signed: true.
 
-**Impacto:**
-Manifesto gerado em produção aparece como "não reconhecido" no CAI Verify.
-Sem parceria PKI ICP-Brasil, não há validade jurídica plena do timestamp.
+**Plano:**
+- Curto prazo: emitir certificado PJ para assinatura digital no CNPJ da ME
+- Médio prazo: constituir CNPJ da Provvi e re-emitir certificado em nome próprio
+- Alternativa técnica: DigiCert internacional (já na CAI Trust List) se
+  necessário resolver signingCredential.trusted antes da Provvi ter CNPJ
 
-**Solução proposta:**
-- Fase 2: parceria com V/Cert (VALID) ou Serasa Experian como CA intermediária
-- Fase 5: submissão à CAI Trust List como primeiro SDK brasileiro listado
-- Migrar `embed_from_memory` → `Builder` quando c2pa-rs estabilizar `unstable_api`
+**Bloqueio atual:**
+Burocrático — sem impedimento técnico. KMS já está configurado e pronto
+para receber o certificado quando disponível.
 
 ---
 
