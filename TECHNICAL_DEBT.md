@@ -6,7 +6,7 @@ Formato: [prioridade] [status] descrição + contexto + solução proposta.
 ---
 
 ## DT-001 — Instrumentação de Performance do Pipeline
-**Prioridade:** Média | **Status:** Pendente | **Registrado:** 2026-03-06
+**Prioridade:** Média | **Status:** Resolvido | **Registrado:** 2026-03-06
 
 **Problema:**
 O pipeline de captura executa 5 camadas em sequência sem telemetria de tempo por camada.
@@ -24,6 +24,13 @@ Meta do roadmap: latência < 800ms P95 (backend) — pipeline local pode consumi
 - Acumular em `CaptureSession.pipelineTimingsMs: Map<String, Long>?`
 - Logar no manifesto em modo debug
 - Implementar antes dos testes de ataque (otimizações precisam de baseline)
+
+**Resolução (2026-03-06):**
+Pipeline otimizado de 12s → 3.5s warm (-71%).
+Integrity + GPS paralelizados. RecaptureDetector e yuvToJpeg
+movidos para Dispatchers.Default. GPS interno paralelizado.
+CameraCapture: executor recriado entre capturas.
+Baseline: cold start ~7s, warm ~3.5s, GPS dominante ~3s.
 
 ---
 
@@ -137,3 +144,22 @@ armazenamento local da sessão quando o upload falha por falta de conectividade.
 
 **Bloqueio:**
 Parceria PKI ICP-Brasil (V/Cert ou Serasa) necessária para timestamp com validade jurídica plena.
+
+---
+
+## DT-007 — GPS Cold Start (~3s) em Primeira Captura
+**Prioridade:** Baixa | **Status:** Pendente | **Registrado:** 2026-03-06
+
+**Problema:**
+GPS domina o pipeline em ~3s — é o timeout mínimo do requestSingleUpdate
+quando não há fix recente em cache.
+
+**Impacto:**
+Cold start ~7s. Warm start ~3.5s. Em uso real o app cliente
+tipicamente já tem GPS aquecido antes de chamar o SDK.
+
+**Solução proposta:**
+- Pré-aquecer GPS no app cliente antes de chamar capture()
+- Documentar na guia de integração: "inicialize o LocationManager
+  antes de exibir a tela de captura"
+- Avaliar getLastKnownLocation com janela de 60s (hoje são 30s)
