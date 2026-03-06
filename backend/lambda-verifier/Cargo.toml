@@ -1,0 +1,23 @@
+[package]
+name    = "lambda-verifier"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "bootstrap"
+path = "src/main.rs"
+
+[dependencies]
+lambda_runtime     = "0.13"
+aws-config         = "1.5"
+aws-sdk-dynamodb   = "1.54"
+aws-sdk-kms        = "1.54"
+serde              = { version = "1", features = ["derive"] }
+serde_json         = "1"
+tokio              = { version = "1", features = ["full"] }
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+sha2               = "0.10"
+hex                = "0.4"
+base64             = "0.22"
+chrono             = { version = "0.4", features = ["serde"] }
