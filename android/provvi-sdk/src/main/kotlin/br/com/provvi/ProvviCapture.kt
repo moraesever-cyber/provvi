@@ -16,6 +16,8 @@ import br.com.provvi.camera.SecureCameraCapture
 import br.com.provvi.location.LocationResult
 import br.com.provvi.location.LocationValidationOutcome
 import br.com.provvi.location.LocationValidator
+import br.com.provvi.backend.BackendResult
+import br.com.provvi.backend.ProvviBackendClient
 import br.com.provvi.recapture.RecaptureAnalysis
 import br.com.provvi.recapture.RecaptureDetector
 import br.com.provvi.recapture.RecaptureIndicator
@@ -45,6 +47,8 @@ import java.util.UUID
  * @param deviceIntegrityToken  Token JWT da Play Integrity API para validação no backend (Camada 2).
  *                              Vazio se a API não estava disponível.
  * @param capturedAtNanos       Timestamp de captura em nanosegundos, origem: sensor da câmera.
+ * @param manifestUrl           URL presigned S3 do manifesto após upload ao backend.
+ *                              null se [ProvviBackendClient] não foi fornecido ou se o upload falhou.
  */
 data class CaptureSession(
     val sessionId: String,
@@ -53,7 +57,8 @@ data class CaptureSession(
     val frameHashHex: String,
     val locationSuspicious: Boolean,
     val deviceIntegrityToken: String,
-    val capturedAtNanos: Long
+    val capturedAtNanos: Long,
+    val manifestUrl: String? = null
 ) {
     // Gerado — necessário para data class com ByteArray
     override fun equals(other: Any?): Boolean {
@@ -65,7 +70,8 @@ data class CaptureSession(
                frameHashHex == other.frameHashHex &&
                locationSuspicious == other.locationSuspicious &&
                deviceIntegrityToken == other.deviceIntegrityToken &&
-               capturedAtNanos == other.capturedAtNanos
+               capturedAtNanos == other.capturedAtNanos &&
+               manifestUrl == other.manifestUrl
     }
 
     override fun hashCode(): Int {
@@ -76,6 +82,7 @@ data class CaptureSession(
         result = 31 * result + locationSuspicious.hashCode()
         result = 31 * result + deviceIntegrityToken.hashCode()
         result = 31 * result + capturedAtNanos.hashCode()
+        result = 31 * result + manifestUrl.hashCode()
         return result
     }
 }
@@ -150,7 +157,8 @@ class ProvviCapture(context: Context) {
      */
     suspend fun capture(
         lifecycleOwner: LifecycleOwner,
-        assertions: ProvviAssertions = GenericAssertions()
+        assertions: ProvviAssertions = GenericAssertions(),
+        backendClient: ProvviBackendClient? = null
     ): CaptureOutcome {
 
         // Identificador único da sessão — usado como nonce da Play Integrity API
@@ -307,20 +315,50 @@ class ProvviCapture(context: Context) {
         // Camada 4: Assinatura C2PA via c2pa-rs (Rust JNI)
         // O manifesto é assinado com Ed25519 (dev) ou ICP-Brasil (produção).
         // -----------------------------------------------------------------
-        return when (val signingResult = c2paEngine.sign(jpegBytes, allAssertions)) {
-            is C2paResult.Success -> CaptureOutcome.Success(
-                CaptureSession(
-                    sessionId             = sessionId,
-                    manifestJson          = signingResult.manifestJson,
-                    imageJpegBytes        = jpegBytes,
-                    frameHashHex          = successFrame.frameHash.rawHashHex,
-                    locationSuspicious    = locationResult?.locationSuspicious ?: false,
-                    deviceIntegrityToken  = integrityToken,
-                    capturedAtNanos       = successFrame.frameHash.timestampNanos
-                )
-            )
-            is C2paResult.Error -> CaptureOutcome.SigningFailed(signingResult.message)
+        val signingResult = c2paEngine.sign(jpegBytes, allAssertions)
+
+        if (signingResult is C2paResult.Error) {
+            return CaptureOutcome.SigningFailed(signingResult.message)
         }
+
+        val signed = signingResult as C2paResult.Success
+
+        // Constrói a sessão local — válida independentemente do resultado do upload
+        var session = CaptureSession(
+            sessionId            = sessionId,
+            manifestJson         = signed.manifestJson,
+            imageJpegBytes       = jpegBytes,
+            frameHashHex         = successFrame.frameHash.rawHashHex,
+            locationSuspicious   = locationResult?.locationSuspicious ?: false,
+            deviceIntegrityToken = integrityToken,
+            capturedAtNanos      = successFrame.frameHash.timestampNanos,
+            manifestUrl          = null
+        )
+
+        // -----------------------------------------------------------------
+        // Upload opcional ao backend (S3 + DynamoDB via Lambda).
+        //
+        // Falhas de upload são logadas mas NÃO invalidam a sessão local —
+        // o integrador recebe a sessão assinada com manifestUrl = null e
+        // pode implementar retry próprio se necessário.
+        // -----------------------------------------------------------------
+        if (backendClient != null) {
+            when (val uploadResult = backendClient.upload(session)) {
+                is BackendResult.Success -> {
+                    // Enriquece a sessão com a URL presigned do S3
+                    session = session.copy(manifestUrl = uploadResult.manifestUrl)
+                }
+                is BackendResult.Error -> {
+                    // Upload falhou — sessão local permanece válida sem a URL
+                    android.util.Log.w(
+                        "ProvviCapture",
+                        "Upload ao backend falhou (retryable=${uploadResult.isRetryable}): ${uploadResult.message}"
+                    )
+                }
+            }
+        }
+
+        return CaptureOutcome.Success(session)
     }
 
     /**
