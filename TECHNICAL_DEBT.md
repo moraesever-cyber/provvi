@@ -103,3 +103,37 @@ Em produção, expõe a conta AWS a abuso e custos indevidos.
 - Ou Lambda Function URL com IAM auth
 - SDK passa a chave no header `x-api-key` configurada via `BackendConfig`
 - Implementar antes de qualquer teste com dados reais
+
+## DT-006 — Fluxo Offline-First não implementado
+**Prioridade:** Alta | **Status:** Pendente | **Registrado:** 2026-03-06
+
+**Problema:**
+O diferencial competitivo "captura segura offline" do roadmap (item 1.3) está
+parcialmente implementado. A assinatura local C2PA funciona sem rede, mas não há
+armazenamento local da sessão quando o upload falha por falta de conectividade.
+
+**O que já funciona offline:**
+- Captura do frame (Camada 1)
+- Hash SHA-256 pré-codec (Camada 3)
+- Validação GPS local (Camada 3.5)
+- Assinatura C2PA com certificado local (Camada 4)
+
+**O que falta:**
+- Fila local de sessões pendentes de upload (Room ou SharedPreferences)
+- Retry automático quando conectividade é restaurada (WorkManager)
+- Re-assinatura com timestamp ICP-Brasil no backend (diferencial jurídico)
+- Indicação na UI de "sessão pendente de sincronização"
+
+**Impacto sem implementação:**
+- Se upload falha por falta de rede, a sessão local é válida mas não é persistida
+- App reiniciado = sessão perdida
+- Diferencial do roadmap parcialmente verdadeiro
+
+**Solução proposta:**
+1. `ProvviSessionStore`: armazena sessões localmente via Room
+2. `ProvviSyncWorker`: WorkManager com constraint de rede para retry automático
+3. Backend: endpoint de re-assinatura com timestamp ACT ICP-Brasil
+4. `BackendConfig.offlineMode: Boolean` para controle pelo integrador
+
+**Bloqueio:**
+Parceria PKI ICP-Brasil (V/Cert ou Serasa) necessária para timestamp com validade jurídica plena.
