@@ -15,6 +15,8 @@ struct FunctionUrlEvent {
     body: Option<String>,
     #[serde(rename = "isBase64Encoded")]
     is_base64_encoded: Option<bool>,
+    // Headers HTTP enviados pelo SDK (case-insensitive na Function URL)
+    headers: Option<std::collections::HashMap<String, String>>,
     // Campos diretos para invocação via CLI (sem envelope)
     session_id: Option<String>,
 }
@@ -57,6 +59,30 @@ struct ErrorResponse {
 async fn handler(
     event: LambdaEvent<FunctionUrlEvent>,
 ) -> Result<SignResponse, Error> {
+    // ------------------------------------------------------------------
+    // 0. Autenticação por API Key
+    // Invocações via CLI (sem headers) ignoram a validação — apenas
+    // requisições HTTP via Function URL precisam do header x-api-key.
+    // ------------------------------------------------------------------
+    if event.payload.headers.is_some() {
+        let expected_key = std::env::var("API_KEY")
+            .map_err(|_| "API_KEY não configurada")?;
+
+        let provided_key = event.payload.headers
+            .as_ref()
+            .and_then(|h| {
+                h.get("x-api-key")
+                    .or_else(|| h.get("X-Api-Key"))
+                    .or_else(|| h.get("X-API-KEY"))
+            })
+            .map(|s| s.as_str())
+            .unwrap_or("");
+
+        if provided_key != expected_key {
+            return Err("Unauthorized: API Key inválida ou ausente".into());
+        }
+    }
+
     // Extrai o SignRequest do envelope Function URL ou do payload direto CLI
     let req: SignRequest = if let Some(body) = event.payload.body {
         let decoded = if event.payload.is_base64_encoded.unwrap_or(false) {

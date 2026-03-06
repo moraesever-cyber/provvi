@@ -27,8 +27,9 @@ private const val TAG = "ProvviBackendClient"
  * @param timeoutSeconds Timeout total da requisição HTTP em segundos. Padrão: 30.
  */
 data class BackendConfig(
-    val lambdaUrl:       String,
-    val timeoutSeconds:  Long = 30
+    val lambdaUrl:      String,
+    val timeoutSeconds: Long   = 30,
+    val apiKey:         String = ""
 )
 
 // ---------------------------------------------------------------------------
@@ -104,10 +105,15 @@ class ProvviBackendClient(private val config: BackendConfig) {
     suspend fun upload(session: CaptureSession): BackendResult = withContext(Dispatchers.IO) {
         try {
             val body = buildRequestBody(session)
-            val request = Request.Builder()
+            val requestBuilder = Request.Builder()
                 .url(config.lambdaUrl)
                 .post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
+
+            if (config.apiKey.isNotEmpty()) {
+                requestBuilder.addHeader("x-api-key", config.apiKey)
+            }
+
+            val request = requestBuilder.build()
 
             val response = httpClient.newCall(request).execute()
             val responseCode = response.code

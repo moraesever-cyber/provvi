@@ -30,7 +30,8 @@ class MainActivity : FlutterActivity() {
         provviCapture = ProvviCapture(this)
         backendClient = br.com.provvi.backend.ProvviBackendClient(
             br.com.provvi.backend.BackendConfig(
-                lambdaUrl = "https://3nw6hxeumaqhtkrtghjtkzyamq0sojrk.lambda-url.sa-east-1.on.aws/"
+                lambdaUrl = "https://3nw6hxeumaqhtkrtghjtkzyamq0sojrk.lambda-url.sa-east-1.on.aws/",
+                apiKey    = "1fc529447d15beb301f843be82701eed500e86a125c1179d92b642ecd6c77488"
             )
         )
 
