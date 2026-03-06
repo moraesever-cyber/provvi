@@ -201,3 +201,34 @@ fase inicial com um único integrador, mas insuficiente para múltiplos clientes
 
 **Bloqueio:**
 Decisão comercial sobre modelo de licenciamento antes da implementação técnica.
+
+## DT-009 — Serviço de Verificação de Autenticidade
+**Prioridade:** Alta | **Status:** Pendente | **Registrado:** 2026-03-06
+
+**Problema:**
+Não existe endpoint de verificação de autenticidade de imagens capturadas.
+O manifesto C2PA e a imagem estão armazenados separadamente no S3 — o CAI Verify
+público não consegue verificar sem um serviço intermediário.
+
+**Fluxo necessário:**
+1. Auditor envia: session_id + imagem original
+2. Serviço busca manifesto no S3 e hash no DynamoDB
+3. Calcula hash da imagem recebida
+4. Compara: hash(imagem) == hash_manifesto == hash_dynamodb
+5. Verifica assinatura C2PA do manifesto
+6. Retorna relatório: válido/inválido + metadados + cadeia de custódia
+
+**Impacto sem implementação:**
+- Diferencial de auditabilidade do roadmap não está disponível
+- HabilitAi não consegue responder questionamentos do MEC sobre provas de presença
+- Modelo de receita por verificação (Modelo A) não pode ser implementado
+
+**Solução proposta:**
+- Segunda Lambda `lambda-verifier` em Rust
+- Endpoint: POST /verify com body: {session_id, image_base64}
+- Retorna: {valid: bool, session_id, captured_at, location, assertions, report_pdf_url}
+- Relatório PDF exportável com cadeia de custódia (CPC 2015)
+- Implementar antes do go-live com HabilitAi
+
+**Dependências:**
+- DT-003: certificado de produção ICP-Brasil para validade jurídica plena
