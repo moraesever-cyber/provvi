@@ -163,3 +163,41 @@ tipicamente já tem GPS aquecido antes de chamar o SDK.
 - Documentar na guia de integração: "inicialize o LocationManager
   antes de exibir a tela de captura"
 - Avaliar getLastKnownLocation com janela de 60s (hoje são 30s)
+
+## DT-008 — Autenticação por Cliente e Controle de Licença
+**Prioridade:** Alta | **Status:** Pendente | **Registrado:** 2026-03-06
+
+**Problema:**
+A autenticação atual usa uma única API Key compartilhada — adequada para
+fase inicial com um único integrador, mas insuficiente para múltiplos clientes.
+
+**Dois problemas distintos:**
+
+**8a — Autenticação por cliente:**
+- Uma API Key por integrador (HabilitAi, Autovist, etc.)
+- Rastreabilidade de uso por cliente no backend
+- Rate limiting individual via AWS API Gateway
+- Rotação de chaves sem coordenação entre clientes
+
+**8b — Controle de licença do SDK:**
+- Cada integrador recebe uma licença com validade, volume de capturas e ambiente permitido
+- SDK valida licença online no momento da captura (ou periodicamente)
+- Backend rejeita capturas de licenças expiradas, suspensas ou acima do limite
+- Painel de gestão de licenças para o Provvi controlar contratos
+
+**Impacto sem implementação:**
+- Sem 8a: impossível ter múltiplos clientes com controle individual
+- Sem 8b: qualquer um com o .aar pode usar o SDK sem contrato
+
+**Solução proposta:**
+- 8a: AWS API Gateway + Usage Plans + uma API Key por cliente
+- 8b: `ProvviLicense` — token JWT assinado com validade, clientId, volumeLimit
+  e ambientes permitidos. SDK valida JWT localmente (chave pública embutida)
+  e backend valida no momento do armazenamento.
+
+**Dependências:**
+- DT-005 resolvido parcialmente (API Key única implementada)
+- Requer definição comercial: modelo de cobrança por captura ou por período?
+
+**Bloqueio:**
+Decisão comercial sobre modelo de licenciamento antes da implementação técnica.
