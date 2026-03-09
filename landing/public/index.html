@@ -8,6 +8,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<meta name="theme-color" content="#07111F">
 
 <style>
 /* ══════════════════════════════════════════════════
@@ -1061,7 +1063,75 @@ footer {
 }
 
 /* ══════════════════════════════════════════════════
-   RESPONSIVO
+   MENU MOBILE
+══════════════════════════════════════════════════ */
+.nav-hamburger {
+  display: none;
+  flex-direction: column;
+  gap: 5px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 6px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+.nav-hamburger:hover { background: rgba(255,255,255,0.06); }
+.nav-hamburger span {
+  display: block;
+  width: 22px;
+  height: 2px;
+  background: rgba(255,255,255,0.75);
+  border-radius: 1px;
+  transition: transform 0.25s ease, opacity 0.2s;
+}
+.nav-hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.nav-hamburger.open span:nth-child(2) { opacity: 0; transform: scaleX(0); }
+.nav-hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+.mobile-menu {
+  display: none;
+  position: fixed;
+  top: 68px;
+  left: 0; right: 0;
+  background: rgba(7,17,31,0.97);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  z-index: 98;
+  padding: 8px 24px 24px;
+  flex-direction: column;
+  animation: slideDown 0.2s ease;
+}
+.mobile-menu.open { display: flex; }
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.mobile-menu a {
+  font-size: 15px;
+  font-weight: 400;
+  color: rgba(255,255,255,0.65);
+  text-decoration: none;
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  letter-spacing: 0.02em;
+  transition: color 0.2s;
+}
+.mobile-menu a:hover { color: var(--white); }
+.mobile-menu a:last-child { border-bottom: none; }
+.mobile-menu .mobile-cta {
+  margin-top: 12px;
+  background: var(--blue);
+  color: var(--white) !important;
+  border-radius: 4px;
+  padding: 14px 24px;
+  text-align: center;
+  font-weight: 500;
+  border-bottom: none;
+}
+
+/* ══════════════════════════════════════════════════
+   RESPONSIVO — 900px
 ══════════════════════════════════════════════════ */
 @media (max-width: 900px) {
   .problema-grid { grid-template-columns: 1fr; gap: 40px; }
@@ -1072,10 +1142,30 @@ footer {
   .pipeline-steps { gap: 16px; justify-content: flex-start; }
   .pipeline-step::after { display: none; }
   .nav-links { display: none; }
+  .nav-hamburger { display: flex; }
   .hero-stats { gap: 28px; }
   .footer-legal { align-items: flex-start; }
   .footer-inner { flex-direction: column; align-items: flex-start; }
   .consorcio-inner { gap: 16px; }
+  .verif-input-row { flex-direction: column; }
+  .verif-btn { width: 100%; justify-content: center; }
+  #hero { padding: 88px 20px 60px; }
+  .pipeline { padding: 28px 20px; }
+}
+
+/* ══════════════════════════════════════════════════
+   RESPONSIVO — 480px
+══════════════════════════════════════════════════ */
+@media (max-width: 480px) {
+  :root { --section-pad: 64px 20px; }
+  .hero-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .hero-stat-number { font-size: 28px; }
+  .consorcio-body { flex-direction: column; align-items: flex-start; }
+  .consorcio-divider-v { display: none; }
+  .hero-actions { flex-direction: column; }
+  .btn-primary, .btn-ghost { width: 100%; justify-content: center; text-align: center; }
+  .verificador-box { padding: 24px 16px; }
+  nav { padding: 0 20px; }
 }
 </style>
 </head>
@@ -1102,7 +1192,19 @@ footer {
     <li><a href="#verificador">Verificador</a></li>
     <li><a href="#contato" class="nav-cta">Fale Conosco</a></li>
   </ul>
+  <button class="nav-hamburger" id="hamburger" aria-label="Menu" aria-expanded="false">
+    <span></span><span></span><span></span>
+  </button>
 </nav>
+
+<!-- Menu mobile -->
+<div class="mobile-menu" id="mobileMenu" role="navigation">
+  <a href="#problema" onclick="fecharMenu()">O Problema</a>
+  <a href="#solucao" onclick="fecharMenu()">A Solução</a>
+  <a href="#casos" onclick="fecharMenu()">Casos de Uso</a>
+  <a href="#verificador" onclick="fecharMenu()">Verificador</a>
+  <a href="#contato" class="mobile-cta" onclick="fecharMenu()">Fale Conosco</a>
+</div>
 
 <!-- ══════════════════════ HERO ══════════════════════ -->
 <section id="hero">
@@ -1597,4 +1699,41 @@ document.getElementById('sessionInput').addEventListener('keydown', (e) => {
 
 // ── Formulário de contato ──────────────────────────────
 function enviarContato(e) {
-  e.prevent
+  e.preventDefault();
+  const form = document.getElementById('contatoForm');
+  const success = document.getElementById('formSuccess');
+  const btn = form.querySelector('.form-submit');
+  btn.textContent = 'Enviando...';
+  btn.disabled = true;
+  // Substituir pelo fetch real quando o backend de contato estiver configurado
+  setTimeout(() => {
+    form.style.display = 'none';
+    success.style.display = 'block';
+  }, 800);
+}
+
+// ── Menu mobile ────────────────────────────────────────
+const hamburger = document.getElementById('hamburger');
+const mobileMenu = document.getElementById('mobileMenu');
+
+hamburger.addEventListener('click', () => {
+  const aberto = mobileMenu.classList.toggle('open');
+  hamburger.classList.toggle('open', aberto);
+  hamburger.setAttribute('aria-expanded', aberto);
+  document.body.style.overflow = aberto ? 'hidden' : '';
+});
+
+function fecharMenu() {
+  mobileMenu.classList.remove('open');
+  hamburger.classList.remove('open');
+  hamburger.setAttribute('aria-expanded', 'false');
+  document.body.style.overflow = '';
+}
+
+// Fecha o menu ao redimensionar para desktop
+window.addEventListener('resize', () => {
+  if (window.innerWidth > 900) fecharMenu();
+});
+</script>
+</body>
+</html>
