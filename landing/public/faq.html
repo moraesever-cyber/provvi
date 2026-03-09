@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Provvi — Perguntas Frequentes</title>
+<meta name="description" content="Perguntas frequentes sobre o Provvi SDK: autenticidade de imagens via C2PA e ICP-Brasil para seguros, vistorias veiculares e compliance com PL 2338/2023 e PL 3507/2025.">
+<style>
+  :root {
+    --navy:   #07111F;
+    --azul:   #2563A8;
+    --bluel:  #4A9EE8;
+    --cinza:  #F0F4F8;
+    --cinzat: #4A5568;
+    --verde:  #1A6B3C;
+    --verdel: #E8F5EE;
+    --white:  #FFFFFF;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: Arial, sans-serif;
+    background: var(--white);
+    color: var(--navy);
+    line-height: 1.6;
+  }
+
+  /* ── HEADER ── */
+  .site-header {
+    background: var(--navy);
+    padding: 18px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .site-header .brand { font-size: 22pt; font-weight: bold; color: var(--bluel); letter-spacing: 2px; }
+  .site-header .brand span { font-size: 10pt; color: #A0C4E8; font-weight: normal; display: block; letter-spacing: 0; margin-top: 2px; }
+  .site-header nav a { color: #A0C4E8; text-decoration: none; margin-left: 24px; font-size: 10pt; }
+  .site-header nav a:hover { color: var(--white); }
+
+  /* ── HERO ── */
+  .hero {
+    background: linear-gradient(135deg, var(--navy) 0%, #0d2040 100%);
+    padding: 52px 40px 44px 40px;
+    text-align: center;
+    color: var(--white);
+  }
+  .hero h1 { font-size: 26pt; font-weight: bold; margin-bottom: 10px; }
+  .hero .sub { font-size: 12pt; color: #A0C4E8; max-width: 640px; margin: 0 auto 24px auto; }
+  .hero .pills { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .pill {
+    background: rgba(74,158,232,0.18);
+    border: 1px solid rgba(74,158,232,0.4);
+    color: var(--bluel);
+    padding: 5px 14px;
+    border-radius: 20px;
+    font-size: 9pt;
+    font-weight: bold;
+  }
+
+  /* ── MAIN CONTENT ── */
+  .container {
+    max-width: 820px;
+    margin: 44px auto 60px auto;
+    padding: 0 24px;
+  }
+  .section-title {
+    font-size: 10pt;
+    font-weight: bold;
+    color: var(--azul);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 20px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--cinza);
+  }
+
+  /* ── FAQ ITEMS ── */
+  .faq-item {
+    margin-bottom: 18px;
+    border: 1px solid #D1D9E6;
+    border-radius: 6px;
+    overflow: hidden;
+    transition: box-shadow 0.2s;
+  }
+  .faq-item:hover { box-shadow: 0 2px 12px rgba(7,17,31,0.08); }
+  .faq-question {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 18px 20px;
+    background: var(--cinza);
+    cursor: pointer;
+    user-select: none;
+  }
+  .faq-question:hover { background: #E4ECF4; }
+  .faq-num {
+    background: var(--azul);
+    color: var(--white);
+    font-size: 9pt;
+    font-weight: bold;
+    min-width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .faq-q-text {
+    font-size: 11pt;
+    font-weight: bold;
+    color: var(--navy);
+    flex: 1;
+    line-height: 1.45;
+  }
+  .faq-toggle {
+    color: var(--azul);
+    font-size: 18pt;
+    font-weight: bold;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: transform 0.2s;
+  }
+  .faq-item.open .faq-toggle { transform: rotate(45deg); }
+  .faq-answer {
+    display: none;
+    padding: 18px 20px 20px 60px;
+    font-size: 10.5pt;
+    color: #1a2b3c;
+    line-height: 1.65;
+    border-top: 1px solid #D1D9E6;
+    background: var(--white);
+  }
+  .faq-item.open .faq-answer { display: block; }
+  .faq-answer p { margin-bottom: 10px; }
+  .faq-answer p:last-child { margin-bottom: 0; }
+  .faq-answer ul { margin: 8px 0 10px 20px; }
+  .faq-answer li { margin-bottom: 6px; }
+  .faq-answer .tag {
+    display: inline-block;
+    background: var(--verdel);
+    color: var(--verde);
+    font-size: 8.5pt;
+    font-weight: bold;
+    padding: 2px 9px;
+    border-radius: 12px;
+    margin-right: 6px;
+  }
+  .faq-answer .tag.amber {
+    background: #FFF3E0;
+    color: #7A4800;
+  }
+  .faq-answer .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 12px 0;
+  }
+  .compare-box {
+    padding: 12px 14px;
+    border-radius: 4px;
+    font-size: 10pt;
+  }
+  .compare-box.red { background: #FFF0EE; border-left: 3px solid #C0392B; }
+  .compare-box.green { background: var(--verdel); border-left: 3px solid var(--verde); }
+  .compare-box b { display: block; margin-bottom: 5px; }
+  .compare-box.red b { color: #C0392B; }
+  .compare-box.green b { color: var(--verde); }
+  .highlight-box {
+    background: var(--cinza);
+    border-left: 3px solid var(--azul);
+    padding: 10px 14px;
+    border-radius: 3px;
+    font-size: 10pt;
+    margin: 10px 0;
+  }
+
+  /* ── WHITEPAPERS CTA ── */
+  .wp-section {
+    margin-top: 48px;
+    padding: 32px 36px;
+    background: var(--navy);
+    border-radius: 8px;
+    color: var(--white);
+  }
+  .wp-section h2 { font-size: 15pt; color: var(--bluel); margin-bottom: 8px; }
+  .wp-section p { color: #A0C4E8; font-size: 10.5pt; margin-bottom: 20px; }
+  .wp-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .wp-card {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(74,158,232,0.3);
+    border-radius: 6px;
+    padding: 18px;
+  }
+  .wp-card h3 { font-size: 10.5pt; color: var(--white); margin-bottom: 6px; }
+  .wp-card p { font-size: 9.5pt; color: #A0C4E8; margin-bottom: 14px; }
+  .wp-card a {
+    display: inline-block;
+    background: var(--azul);
+    color: var(--white);
+    text-decoration: none;
+    font-size: 9.5pt;
+    font-weight: bold;
+    padding: 7px 16px;
+    border-radius: 4px;
+  }
+  .wp-card a:hover { background: var(--bluel); }
+
+  /* ── FOOTER ── */
+  .site-footer {
+    background: var(--cinza);
+    padding: 24px 40px;
+    text-align: center;
+    font-size: 9pt;
+    color: var(--cinzat);
+    border-top: 1px solid #D1D9E6;
+  }
+  .site-footer a { color: var(--azul); text-decoration: none; }
+
+  @media (max-width: 600px) {
+    .site-header { padding: 14px 20px; flex-direction: column; gap: 10px; }
+    .hero { padding: 36px 20px; }
+    .hero h1 { font-size: 20pt; }
+    .container { padding: 0 16px; }
+    .faq-answer { padding-left: 20px; }
+    .wp-cards { grid-template-columns: 1fr; }
+    .faq-answer .compare { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="site-header">
+  <div class="brand">PROVVI<span>Tecnologia de Autenticidade de Imagens</span></div>
+  <nav>
+    <a href="/">Início</a>
+    <a href="/verificador">Verificador</a>
+    <a href="/contato">Contato</a>
+  </nav>
+</header>
+
+<!-- HERO -->
+<section class="hero">
+  <h1>Perguntas Frequentes</h1>
+  <p class="sub">Tudo o que você precisa saber sobre autenticidade criptográfica de imagens, C2PA, ICP-Brasil e o que o Marco Legal da IA muda para o seu setor.</p>
+  <div class="pills">
+    <span class="pill">C2PA</span>
+    <span class="pill">ICP-Brasil</span>
+    <span class="pill">PL 2338/2023</span>
+    <span class="pill">PL 3507/2025</span>
+    <span class="pill">Seguros</span>
+    <span class="pill">Vistoria Veicular</span>
+  </div>
+</section>
+
+<!-- FAQ -->
+<main class="container">
+  <p class="section-title">7 perguntas · atualizado em março de 2026</p>
+
+  <!-- Q1 -->
+  <div class="faq-item open">
+    <div class="faq-question" onclick="toggle(this)">
+      <div class="faq-num">1</div>
+      <div class="faq-q-text">O que exatamente o Provvi resolve que os sistemas atuais não resolvem?</div>
+      <div class="faq-toggle">+</div>
+    </div>
+    <div class="faq-answer">
+      <p>A maioria dos sistemas protege o dado <strong>depois que ele entra no servidor</strong>. O Provvi protege a origem.</p>
+      <p>Resolvemos a "última milha" da auditabilidade: provamos que o dado que alimenta seu sistema de IA ou seu laudo de vistoria é autêntico, capturado no local e hora declarados, sem manipulações — antes de qualquer transmissão ou processamento.</p>
+      <div class="highlight-box">Pense assim: assinaturas digitais convencionais garantem que o arquivo não foi alterado <em>depois de criado</em>. O Provvi garante que o arquivo foi criado no lugar, hora e dispositivo declarados.</div>
+    </div>
+  </div>
+
+  <!-- Q2 -->
+  <div class="faq-item">
+    <div class="faq-question" onclick="toggle(this)">
+      <div class="faq-num">2</div>
+      <div class="faq-q-text">Por que o Marco Legal da IA (PL 2338) torna o Provvi indispensável?</div>
+      <div class="faq-toggle">+</div>
+    </div>
+    <div class="faq-answer">
+      <p>O PL 2338 introduz a <strong>responsabilidade objetiva</strong> para sistemas de alto risco, como os de seguros e crédito. Isso inverte o ônus da prova: se sua IA negar um sinistro e o cliente processar, é a <em>sua empresa</em> que precisa provar que o sistema não errou.</p>
+      <p>Sem autenticidade verificável das imagens de entrada, você não consegue provar que os dados que alimentaram a decisão eram verdadeiros. A defesa jurídica torna-se tecnicamente inviável.</p>
+      <p>Com o Provvi, você apresenta o manifesto C2PA como evidência forense — <strong>verificável por qualquer perito, independentemente do seu sistema</strong>. A prova não depende da sua palavra.</p>
+    </div>
+  </div>
+
+  <!-- Q3 -->
+  <div class="faq-item">
+    <div class="faq-question" onclick="toggle(this)">
+      <div class="faq-num">3</div>
+      <div class="faq-q-text">Como o Provvi ajuda a reduzir a sinistralidade na prática?</div>
+      <div class="faq-toggle">+</div>
+    </div>
+    <div class="faq-answer">
+      <p>Através de três vetores complementares:</p>
+      <ul>
+        <li><span class="tag">Prevenção</span> Inviabiliza a <strong>fraude de contexto</strong> — fotos de outros veículos ou eventos anteriores usadas em novos sinistros. A imagem pode ser tecnicamente perfeita; sem manifesto C2PA válido, a proveniência falsa é detectável.</li>
+        <li><span class="tag">Auditabilidade</span> Permite comparar o estado do veículo na vistoria prévia (autenticada) com o estado declarado no sinistro, eliminando disputas sobre danos pré-existentes com evidência objetiva.</li>
+        <li><span class="tag">Deterrência</span> Quando o segurado sabe que a captura é autenticada criptograficamente no ato, uma parcela das tentativas de fraude simplesmente não ocorre. O efeito preventivo é difícil de quantificar, mas consistentemente observado em contextos de auditabilidade elevada.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Q4 -->
+  <div class="faq-item">
+    <div class="faq-question" onclick="toggle(this)">
+      <div class="faq-num">4</div>
+      <div class="faq-q-text">O que é o padrão C2PA e por que ele é seguro?</div>
+      <div class="faq-toggle">+</div>
+    </div>
+    <div class="faq-answer">
+      <p>É o padrão global de proveniência de conteúdo adotado por um consórcio que inclui Google, Microsoft, Adobe, Intel, BBC e Reuters. Não é um produto proprietário — é uma especificação técnica aberta.</p>
+      <p>Ele cria um <strong>manifesto criptográfico</strong> que acompanha a imagem e registra sua história: quem capturou, com qual dispositivo, quando e onde. Qualquer alteração posterior — recorte, ajuste de brilho, edição de GPS ou data — quebra a assinatura e torna a adulteração instantaneamente detectável.</p>
+      <div class="highlight-box">A segurança não depende de confiar no Provvi: qualquer ferramenta compatível com o padrão C2PA pode verificar a autenticidade de forma independente, incluindo verificadores públicos.</div>
+    </div>
+  </div>
+
+  <!-- Q5 -->
+  <div class="faq-item">
+    <div class="faq-question" onclick="toggle(this)">
+      <div class="faq-num">5</div>
+      <div class="faq-q-text">Qual a importância da assinatura ICP-Brasil nesse processo?</div>
+      <div class="faq-toggle">+</div>
+    </div>
+    <div class="faq-answer">
+      <p>O C2PA garante a <strong>integridade técnica</strong> — prova matemática de que a imagem não foi alterada. Mas para que essa prova tenha validade jurídica plena no Brasil, a assinatura precisa ser emitida por uma autoridade reconhecida pela ICP-Brasil (Infraestrutura de Chaves Públicas Brasileira, regulamentada pela MP 2.200-2/2001).</p>
+      <p>Documentos assinados via ICP-Brasil têm o mesmo valor legal de uma assinatura de próprio punho ou de uma ata notarial. Isso é o que sustenta a prova em um tribunal brasileiro.</p>
+      <div class="compare">
+        <div class="compare-box red"><b>C2PA sem ICP-Brasil</b>Integridade técnica verificável. Valor jurídico limitado em processos brasileiros.</div>
+        <div class="compare-box green"><b>C2PA + ICP-Brasil (Provvi)</b>Integridade técnica + validade jurídica equivalente à assinatura de próprio punho.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Q6 -->
+  <div class="faq-item">
+    <div class="faq-question" onclick="toggle(this)">
+      <div class="faq-num">6</div>
+      <div class="faq-q-text">Minha empresa já usa IA para detectar fraude em fotos. Por que preciso do Provvi?</div>
+      <div class="faq-toggle">+</div>
+    </div>
+    <div class="faq-answer">
+      <p>A IA de detecção de fraude é <strong>reativa e estatística</strong>: ela analisa o conteúdo da imagem e estima a probabilidade de fraude. É valiosa — mas tem um limite fundamental.</p>
+      <p>O Provvi é <strong>determinístico</strong>: não tenta adivinhar se a foto é falsa. Prova matematicamente que ela é real — capturada naquele dispositivo, naquele local, naquele instante.</p>
+      <div class="compare">
+        <div class="compare-box red"><b>IA de visão computacional</b>"Essa imagem parece autêntica?" — resposta probabilística, sujeita a falsos negativos em fraudes sofisticadas.</div>
+        <div class="compare-box green"><b>C2PA + ICP-Brasil</b>"Essa imagem é provadamente autêntica." — resposta determinística, baseada em criptografia assimétrica.</div>
+      </div>
+      <p>Além disso, fraudes sofisticadas que enganam modelos de visão computacional não conseguem forjar um manifesto criptográfico válido sem acesso à chave privada do dispositivo. As duas abordagens são complementares — mas apenas a segunda oferece garantia jurídica robusta.</p>
+    </div>
+  </div>
+
+  <!-- Q7 -->
+  <div class="faq-item">
+    <div class="faq-question" onclick="toggle(this)">
+      <div class="faq-num">7</div>
+      <div class="faq-q-text">A implementação vai gerar atraso ou fricção para o usuário final?</div>
+      <div class="faq-toggle">+</div>
+    </div>
+    <div class="faq-answer">
+      <p>Não. A experiência de captura é idêntica à de uma câmera comum — o usuário não percebe diferença. O processamento ocorre em background, com retorno da interface em cerca de 3,5 segundos.</p>
+      <p>Em locais sem internet — subsolos, pátios cobertos ou áreas rurais — o SDK garante a assinatura local no próprio dispositivo, preservando a rastreabilidade do momento de captura. A sincronização com o backend ocorre assim que a conexão é restabelecida, sem perda da cadeia de custódia.</p>
+      <div class="highlight-box">A integração é plug-and-play: o SDK substitui apenas a câmera nativa no fluxo de captura. Sistemas existentes de gestão de sinistros, laudos ou CRM não requerem modificação.</div>
+    </div>
+  </div>
+
+  <!-- WHITEPAPERS -->
+  <div class="wp-section">
+    <h2>Whitepapers Técnicos</h2>
+    <p>Aprofunde-se nos fundamentos regulatórios e técnicos da autenticidade de evidências digitais com os nossos whitepapers.</p>
+    <div class="wp-cards">
+      <div class="wp-card">
+        <h3>PL 3507/2025 — Vistoria Veicular</h3>
+        <p>C2PA e ICP-Brasil como resposta à vistoria periódica obrigatória: o que a lei vai exigir e como se preparar.</p>
+        <a href="/whitepapers/Provvi-Whitepaper-PL3507-2025.pdf" download>↓ Baixar PDF</a>
+      </div>
+      <div class="wp-card">
+        <h3>PL 2338/2023 — Marco Legal da IA</h3>
+        <p>A última milha da auditabilidade: responsabilidade objetiva, Fraude de Contexto e o princípio da Exatidão da LGPD.</p>
+        <a href="/whitepapers/Provvi-Whitepaper-PL2338-2023.pdf" download>↓ Baixar PDF</a>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- FOOTER -->
+<footer class="site-footer">
+  <p>© 2026 Provvi Tecnologia &nbsp;·&nbsp; <a href="/">provvi.com.br</a> &nbsp;·&nbsp; <a href="mailto:contato@provvi.com.br">contato@provvi.com.br</a></p>
+  <p style="margin-top:6px">Produzido pelo Comitê de Tecnologia e Compliance da Provvi &nbsp;·&nbsp; Março de 2026</p>
+</footer>
+
+<script>
+function toggle(el) {
+  const item = el.closest('.faq-item');
+  item.classList.toggle('open');
+}
+// Fechar todos exceto o primeiro ao carregar
+document.querySelectorAll('.faq-item').forEach((item, i) => {
+  if (i !== 0) item.classList.remove('open');
+});
+</script>
+</body>
+</html>

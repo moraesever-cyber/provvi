@@ -1167,6 +1167,102 @@ footer {
   .verificador-box { padding: 24px 16px; }
   nav { padding: 0 20px; }
 }
+
+/* ══════════════════════════════════════════════════
+   PUBLICAÇÕES
+══════════════════════════════════════════════════ */
+#publicacoes {
+  padding: var(--section-pad);
+  background: var(--off-white);
+}
+.pub-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  margin-top: 48px;
+}
+.pub-card {
+  background: var(--white);
+  border-radius: 8px;
+  padding: 36px 28px;
+  border-top: 3px solid var(--navy-mid);
+  box-shadow: 0 2px 20px rgba(13,30,53,0.06);
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  flex-direction: column;
+}
+.pub-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 32px rgba(13,30,53,0.12);
+}
+.pub-card-type {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--slate);
+  margin-bottom: 16px;
+  display: block;
+}
+.pub-card h3 {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-dark);
+  margin-bottom: 8px;
+  line-height: 1.25;
+}
+.pub-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+.pub-card p {
+  font-size: 14px;
+  color: var(--text-mid);
+  line-height: 1.7;
+  margin-bottom: 20px;
+  flex: 1;
+}
+.pub-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 24px;
+}
+.pub-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--blue);
+  background: rgba(37,99,168,0.08);
+  padding: 3px 10px;
+  border-radius: 3px;
+}
+.btn-outline-blue {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  color: var(--blue);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 12px 24px;
+  border-radius: 4px;
+  text-decoration: none;
+  border: 1px solid var(--blue);
+  transition: background 0.2s, color 0.2s;
+  letter-spacing: 0.02em;
+  align-self: flex-start;
+}
+.btn-outline-blue:hover { background: var(--blue); color: var(--white); }
+@media (max-width: 900px) {
+  .pub-grid { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
@@ -1190,6 +1286,7 @@ footer {
     <li><a href="#solucao">A Solução</a></li>
     <li><a href="#casos">Casos de Uso</a></li>
     <li><a href="#verificador">Verificador</a></li>
+    <li><a href="#publicacoes">Publicações</a></li>
     <li><a href="#contato" class="nav-cta">Fale Conosco</a></li>
   </ul>
   <button class="nav-hamburger" id="hamburger" aria-label="Menu" aria-expanded="false">
@@ -1203,6 +1300,7 @@ footer {
   <a href="#solucao" onclick="fecharMenu()">A Solução</a>
   <a href="#casos" onclick="fecharMenu()">Casos de Uso</a>
   <a href="#verificador" onclick="fecharMenu()">Verificador</a>
+  <a href="#publicacoes" onclick="fecharMenu()">Publicações</a>
   <a href="#contato" class="mobile-cta" onclick="fecharMenu()">Fale Conosco</a>
 </div>
 
@@ -1577,6 +1675,65 @@ footer {
           </div>
         </form>
       </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════ PUBLICAÇÕES ══════════════════════ -->
+<section id="publicacoes">
+  <div class="container">
+    <span class="section-label dark">Publicações</span>
+    <div class="pub-grid reveal">
+
+      <!-- Card 1 — Whitepaper PL 3507/2025 -->
+      <div class="pub-card">
+        <span class="pub-card-type">Whitepaper &middot; PL 3507/2025</span>
+        <h3>Autenticidade como Infraestrutura de Compliance</h3>
+        <p class="pub-subtitle">C2PA e ICP-Brasil como resposta ao PL 3507/2025</p>
+        <p>Vistoria veicular periódica obrigatória: o que a lei vai exigir em termos de rastreabilidade digital e como ECVs, seguradoras e DETRANs podem se preparar.</p>
+        <div class="pub-tags">
+          <span class="pub-tag">Vistoria Veicular</span>
+          <span class="pub-tag">ECVs</span>
+          <span class="pub-tag">Seguradoras</span>
+          <span class="pub-tag">DETRAN</span>
+        </div>
+        <a href="/whitepapers/Provvi-Whitepaper-PL3507-2025.pdf" download class="btn-primary">
+          &#8595; Baixar Whitepaper (PDF)
+        </a>
+      </div>
+
+      <!-- Card 2 — Whitepaper PL 2338/2023 -->
+      <div class="pub-card">
+        <span class="pub-card-type">Whitepaper &middot; PL 2338/2023</span>
+        <h3>A Última Milha da Auditabilidade</h3>
+        <p class="pub-subtitle">C2PA e ICP-Brasil como resposta ao PL 2338/2023</p>
+        <p>Marco Legal da IA e a responsabilidade objetiva: por que seguradoras e fintechs precisam de autenticidade verificável nos dados de entrada dos seus sistemas de IA.</p>
+        <div class="pub-tags">
+          <span class="pub-tag">Marco Legal da IA</span>
+          <span class="pub-tag">Seguros</span>
+          <span class="pub-tag">Fintechs</span>
+          <span class="pub-tag">Compliance</span>
+        </div>
+        <a href="/whitepapers/Provvi-Whitepaper-PL2338-2023.pdf" download class="btn-primary">
+          &#8595; Baixar Whitepaper (PDF)
+        </a>
+      </div>
+
+      <!-- Card 3 — FAQ -->
+      <div class="pub-card">
+        <span class="pub-card-type">FAQ &middot; Perguntas Frequentes</span>
+        <h3>Perguntas Frequentes</h3>
+        <p class="pub-subtitle">Tudo sobre C2PA, ICP-Brasil e compliance regulatório</p>
+        <p>7 perguntas respondidas sobre autenticidade criptográfica de imagens, o padrão C2PA, ICP-Brasil e o que os marcos regulatórios mudam para o seu setor.</p>
+        <div class="pub-tags">
+          <span class="pub-tag">C2PA</span>
+          <span class="pub-tag">ICP-Brasil</span>
+          <span class="pub-tag">PL 2338</span>
+          <span class="pub-tag">PL 3507</span>
+        </div>
+        <a href="/faq.html" class="btn-outline-blue">Ver FAQ &rarr;</a>
+      </div>
+
     </div>
   </div>
 </section>
