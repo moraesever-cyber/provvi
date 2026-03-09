@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Provvi — Opções de Símbolo</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #F0EFED;
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    padding: 48px 24px;
+  }
+
+  h1 {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 11px;
+    font-weight: 400;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: #8A9AB5;
+    margin-bottom: 64px;
+    text-align: center;
+  }
+
+  .options {
+    display: flex;
+    flex-direction: column;
+    gap: 80px;
+    width: 100%;
+    max-width: 680px;
+  }
+
+  .option {
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  .option-label {
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #8A9AB5;
+    font-weight: 400;
+  }
+
+  /* Logo em fundo claro */
+  .logo-light {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 40px 48px;
+    background: #F0EFED;
+    border-radius: 4px;
+  }
+
+  /* Logo em fundo escuro */
+  .logo-dark {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 40px 48px;
+    background: #07111F;
+    border-radius: 4px;
+  }
+
+  .wordmark-light {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-weight: 700;
+    font-size: 42px;
+    color: #1B2A3E;
+    letter-spacing: -0.01em;
+    line-height: 1;
+  }
+
+  .wordmark-dark {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-weight: 700;
+    font-size: 42px;
+    color: #FFFFFF;
+    letter-spacing: -0.01em;
+    line-height: 1;
+  }
+
+  .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  /* Compensação óptica: descendente do "p" desloca o centro do bounding box para baixo,
+     fazendo o símbolo parecer mais alto. Pequeno nudge corrige o alinhamento visual. */
+  .logo-light svg,
+  .logo-dark svg {
+    transform: translateY(4px);
+    flex-shrink: 0;
+  }
+
+  .description {
+    font-size: 13px;
+    color: #6B7C96;
+    line-height: 1.6;
+    max-width: 480px;
+    padding-top: 8px;
+  }
+
+  .divider {
+    width: 100%;
+    height: 1px;
+    background: rgba(0,0,0,0.08);
+  }
+</style>
+</head>
+<body>
+
+<h1>Provvi — Opções de Símbolo</h1>
+
+<div class="options">
+
+  <!-- ══════════════════════════════════════ -->
+  <!-- OPÇÃO 1: CAPTADOR (Viewfinder)        -->
+  <!-- ══════════════════════════════════════ -->
+  <div class="option">
+    <span class="option-label">01 — Captador · viewfinder</span>
+    <div class="pair">
+
+      <div class="logo-light">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Canto superior esquerdo -->
+          <path d="M7,19 L7,7 L19,7" stroke="#1B2A3E" stroke-width="3" fill="none" stroke-linecap="square" stroke-linejoin="miter"/>
+          <!-- Canto superior direito -->
+          <path d="M29,7 L41,7 L41,19" stroke="#1B2A3E" stroke-width="3" fill="none" stroke-linecap="square" stroke-linejoin="miter"/>
+          <!-- Canto inferior esquerdo -->
+          <path d="M7,29 L7,41 L19,41" stroke="#1B2A3E" stroke-width="3" fill="none" stroke-linecap="square" stroke-linejoin="miter"/>
+          <!-- Canto inferior direito -->
+          <path d="M29,41 L41,41 L41,29" stroke="#1B2A3E" stroke-width="3" fill="none" stroke-linecap="square" stroke-linejoin="miter"/>
+          <!-- Ponto central -->
+          <circle cx="24" cy="24" r="3.5" fill="#1B2A3E"/>
+        </svg>
+        <span class="wordmark-light">provvi</span>
+      </div>
+
+      <div class="logo-dark">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M7,19 L7,7 L19,7" stroke="#FFFFFF" stroke-width="3" fill="none" stroke-linecap="square" stroke-linejoin="miter"/>
+          <path d="M29,7 L41,7 L41,19" stroke="#FFFFFF" stroke-width="3" fill="none" stroke-linecap="square" stroke-linejoin="miter"/>
+          <path d="M7,29 L7,41 L19,41" stroke="#FFFFFF" stroke-width="3" fill="none" stroke-linecap="square" stroke-linejoin="miter"/>
+          <path d="M29,41 L41,41 L41,29" stroke="#FFFFFF" stroke-width="3" fill="none" stroke-linecap="square" stroke-linejoin="miter"/>
+          <circle cx="24" cy="24" r="3.5" fill="#4A9EE8"/>
+        </svg>
+        <span class="wordmark-dark">provvi</span>
+      </div>
+
+    </div>
+    <p class="description">Moldura de captura com ponto focal central. Referência direta ao viewfinder da câmera — o instante exato em que a imagem é autenticada. Leitura imediata, funciona em qualquer escala.</p>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ══════════════════════════════════════ -->
+  <!-- OPÇÃO 2: CINTILAÇÃO (Sparkle)        -->
+  <!-- ══════════════════════════════════════ -->
+  <div class="option">
+    <span class="option-label">02 — Cintilação · sparkle</span>
+    <div class="pair">
+
+      <div class="logo-light">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- 4 pontas longas + 4 pontas curtas diagonais = sparkle ✦ -->
+          <path d="
+            M 24,4
+            L 25.4,21.6
+            L 44,24
+            L 25.4,26.4
+            L 24,44
+            L 22.6,26.4
+            L 4,24
+            L 22.6,21.6
+            Z
+          " fill="#1B2A3E"/>
+          <!-- Ponto brilhante pequeno no centro -->
+          <circle cx="24" cy="24" r="2.5" fill="#F0EFED"/>
+        </svg>
+        <span class="wordmark-light">provvi</span>
+      </div>
+
+      <div class="logo-dark">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="
+            M 24,4
+            L 25.4,21.6
+            L 44,24
+            L 25.4,26.4
+            L 24,44
+            L 22.6,26.4
+            L 4,24
+            L 22.6,21.6
+            Z
+          " fill="#FFFFFF"/>
+          <circle cx="24" cy="24" r="2.5" fill="#07111F"/>
+        </svg>
+        <span class="wordmark-dark">provvi</span>
+      </div>
+
+    </div>
+    <p class="description">Estrela de 4 pontas (sparkle). Sugere autenticidade, clareza, luz da verdade. Complementa visualmente o ponto elevado do "i" no wordmark. Tom mais premium e abstrato.</p>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ══════════════════════════════════════ -->
+  <!-- OPÇÃO 3: ÍRIS (Lens aperture)        -->
+  <!-- ══════════════════════════════════════ -->
+  <div class="option">
+    <span class="option-label">03 — Íris · apertura da lente</span>
+    <div class="pair">
+
+      <div class="logo-light">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Círculo externo -->
+          <circle cx="24" cy="24" r="19" stroke="#1B2A3E" stroke-width="2.5" fill="none"/>
+          <!-- 3 elipses sobrepostas em 60° — padrão de íris/abertura -->
+          <ellipse cx="24" cy="24" rx="7.5" ry="15" stroke="#1B2A3E" stroke-width="2" fill="none" transform="rotate(0, 24, 24)"/>
+          <ellipse cx="24" cy="24" rx="7.5" ry="15" stroke="#1B2A3E" stroke-width="2" fill="none" transform="rotate(60, 24, 24)"/>
+          <ellipse cx="24" cy="24" rx="7.5" ry="15" stroke="#1B2A3E" stroke-width="2" fill="none" transform="rotate(120, 24, 24)"/>
+          <!-- Ponto central -->
+          <circle cx="24" cy="24" r="3" fill="#1B2A3E"/>
+        </svg>
+        <span class="wordmark-light">provvi</span>
+      </div>
+
+      <div class="logo-dark">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="24" cy="24" r="19" stroke="#FFFFFF" stroke-width="2.5" fill="none" stroke-opacity="0.9"/>
+          <ellipse cx="24" cy="24" rx="7.5" ry="15" stroke="#4A9EE8" stroke-width="2" fill="none" transform="rotate(0, 24, 24)"/>
+          <ellipse cx="24" cy="24" rx="7.5" ry="15" stroke="#4A9EE8" stroke-width="2" fill="none" transform="rotate(60, 24, 24)"/>
+          <ellipse cx="24" cy="24" rx="7.5" ry="15" stroke="#4A9EE8" stroke-width="2" fill="none" transform="rotate(120, 24, 24)"/>
+          <circle cx="24" cy="24" r="3" fill="#4A9EE8"/>
+        </svg>
+        <span class="wordmark-dark">provvi</span>
+      </div>
+
+    </div>
+    <p class="description">Três elipses em 60° formam o padrão de abertura da íris de uma câmera. Circulo externo reforça o conceito de "certificação" e "completude". Visual mais técnico — comunica precisão óptica e profundidade.</p>
+  </div>
+
+</div>
+
+</body>
+</html>
