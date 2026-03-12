@@ -27,11 +27,24 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // cloudProjectNumber = null — sem conta Google Play Console corporativa ainda.
+        // Quando o integrador fornecer o número do projeto Cloud dele, substitui aqui.
+        // Em produção, cada cliente do SDK Provvi passa seu próprio cloudProjectNumber.
         provviCapture = ProvviCapture(this)
+
+        // Pré-aquece o Play Integrity token provider enquanto o usuário ainda está
+        // na tela de identificação. Com cloudProjectNumber = null, retorna imediatamente.
+        CoroutineScope(Dispatchers.Main).launch {
+            provviCapture.prepare()
+        }
+
         backendClient = br.com.provvi.backend.ProvviBackendClient(
             br.com.provvi.backend.BackendConfig(
-                lambdaUrl = "https://3nw6hxeumaqhtkrtghjtkzyamq0sojrk.lambda-url.sa-east-1.on.aws/",
-                apiKey    = "1fc529447d15beb301f843be82701eed500e86a125c1179d92b642ecd6c77488"
+                lambdaUrl           = "https://3nw6hxeumaqhtkrtghjtkzyamq0sojrk.lambda-url.sa-east-1.on.aws/",
+                apiKey              = "1fc529447d15beb301f843be82701eed500e86a125c1179d92b642ecd6c77488",
+                // TODO: substituir pelo número real do projeto Provvi após abertura de conta
+                // na Play Store. Obtido em: console.cloud.google.com → APIs → Play Integrity API.
+                cloudProjectNumber  = 0L
             )
         )
 
@@ -83,10 +96,12 @@ class MainActivity : FlutterActivity() {
                         "manifestJson"         to session.manifestJson,
                         "frameHashHex"         to session.frameHashHex,
                         "locationSuspicious"   to session.locationSuspicious,
-                        "capturedAtNanos"      to session.capturedAtNanos,
+                        "capturedAtMs"         to session.capturedAtMs,
+                        "clockSuspicious"      to session.clockSuspicious,
                         "hasIntegrityToken"    to session.deviceIntegrityToken.isNotEmpty(),
                         "manifestUrl"          to (session.manifestUrl ?: ""),
-                        "pipelineTimings"      to (session.pipelineTimingsMs ?: emptyMap<String, Long>())
+                        "pipelineTimings"      to (session.pipelineTimingsMs ?: emptyMap<String, Long>()),
+                        "integrityRisk"        to session.integrityRisk
                     ))
                 }
                 is br.com.provvi.CaptureOutcome.SigningFailed ->

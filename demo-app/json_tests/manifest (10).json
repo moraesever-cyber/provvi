@@ -1,0 +1,67 @@
+{
+  "active_manifest": "urn:uuid:d841e7dc-f8d3-4501-9bf5-ecc75dd95b16",
+  "manifests": {
+    "urn:uuid:d841e7dc-f8d3-4501-9bf5-ecc75dd95b16": {
+      "claim_generator": "Provvi SDK/1.0 c2pa-rs/0.36.4",
+      "format": "image/jpeg",
+      "instance_id": "xmp:iid:0b9e259f-fd82-48a7-be95-67e25294bf54",
+      "ingredients": [],
+      "assertions": [
+        {
+          "label": "com.provvi.capture",
+          "data": {
+            "session_id": "b65752ee-8ef7-4c97-a94e-3b33c4913f65",
+            "alg": "sha256",
+            "hash": "7414913029d4ed5c857cfb70fca366b9aa3e85acc13c201de34f9c07cb9a93cc",
+            "timestamp_nanos": 1722556802177394,
+            "width": 640,
+            "height": 480,
+            "format": 35,
+            "plane_order": "Y_U_V",
+            "captured_at_epoch_ms": 1773164652512,
+            "clock_suspicious": false,
+            "physical_camera_id": "0",
+            "latitude": "-23,542643",
+            "longitude": "-46,483555",
+            "accuracy_meters": 24.003,
+            "is_mock": false,
+            "location_suspicious": false,
+            "divergence_meters": 0,
+            "sources_used": [
+              "NETWORK"
+            ],
+            "device_integrity_unavailable": true,
+            "recapture_analysis_version": "1.2",
+            "recapture_method": "physical_artifact_analysis_no_ml",
+            "recapture_verdict": "clean",
+            "authenticity_score": 0.7815602,
+            "indicators_triggered": [],
+            "score_moire": 0.13929133,
+            "score_specular": 0,
+            "score_chromatic": 0,
+            "score_edge": 0.45904252,
+            "score_combined": 0.21843985,
+            "score_mean_luminance": 115.562706,
+            "integrity_risk": "NONE",
+            "captured_by": "14",
+            "reference_id": "14",
+            "pipeline_timings_ms": {
+              "parallel_total_ms": 996,
+              "integrity_check_ms": 0,
+              "location_validation_ms": 6,
+              "camera_frame_ms": 995,
+              "recapture_analysis_ms": 152,
+              "jpeg_conversion_ms": 12
+            }
+          }
+        }
+      ],
+      "signature_info": {
+        "alg": "Ed25519",
+        "issuer": "Provvi",
+        "cert_serial_number": "594012380215176010529106530039289464250252480967"
+      },
+      "label": "urn:uuid:d841e7dc-f8d3-4501-9bf5-ecc75dd95b16"
+    }
+  }
+}
