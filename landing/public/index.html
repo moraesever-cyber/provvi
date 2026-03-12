@@ -1263,6 +1263,14 @@ footer {
 @media (max-width: 900px) {
   .pub-grid { grid-template-columns: 1fr; }
 }
+/* Artigos de blog — variante dourada */
+.pub-card-type.article {
+  color: var(--gold);
+}
+.pub-tag.article {
+  color: var(--gold);
+  background: rgba(201,168,76,0.10);
+}
 </style>
 </head>
 <body>
@@ -1287,6 +1295,7 @@ footer {
     <li><a href="#casos">Casos de Uso</a></li>
     <li><a href="#verificador">Verificador</a></li>
     <li><a href="#publicacoes">Publicações</a></li>
+    <li><a href="#artigos">Artigos</a></li>
     <li><a href="#contato" class="nav-cta">Fale Conosco</a></li>
   </ul>
   <button class="nav-hamburger" id="hamburger" aria-label="Menu" aria-expanded="false">
@@ -1301,6 +1310,7 @@ footer {
   <a href="#casos" onclick="fecharMenu()">Casos de Uso</a>
   <a href="#verificador" onclick="fecharMenu()">Verificador</a>
   <a href="#publicacoes" onclick="fecharMenu()">Publicações</a>
+  <a href="#artigos" onclick="fecharMenu()">Artigos</a>
   <a href="#contato" class="mobile-cta" onclick="fecharMenu()">Fale Conosco</a>
 </div>
 
@@ -1732,6 +1742,63 @@ footer {
           <span class="pub-tag">PL 3507</span>
         </div>
         <a href="/faq.html" class="btn-outline-blue">Ver FAQ &rarr;</a>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════ ARTIGOS DO BLOG ══════════════════════ -->
+<section id="artigos">
+  <div class="container">
+    <span class="section-label dark">Artigos</span>
+    <div class="pub-grid reveal">
+
+      <!-- Card 1 — PL 3507/2025 (mais recente) -->
+      <div class="pub-card">
+        <span class="pub-card-type article">Legislação &amp; Compliance</span>
+        <h3>Vistoria veicular obrigatória: o que o PL 3507/2025 vai exigir das ECVs em termos de rastreabilidade digital</h3>
+        <p class="pub-subtitle">Análise técnico-jurídica dos requisitos de rastreabilidade para ECVs</p>
+        <p>O PL 3507/2025 torna obrigatória a vistoria periódica para veículos com mais de 5 anos. Entenda o que muda para as ECVs: laudo eletrônico integrado ao RENAVAM/SISCSV, transmissão obrigatória e como C2PA + ICP-Brasil respondem às exigências de rastreabilidade digital.</p>
+        <div class="pub-tags">
+          <span class="pub-tag article">PL 3507/2025</span>
+          <span class="pub-tag article">ECVs</span>
+          <span class="pub-tag article">Rastreabilidade</span>
+        </div>
+        <a href="/whitepapers/Provvi-Blog-Artigo3-PL3507.pdf" download class="btn-primary">
+          &#8595; Baixar Artigo (PDF)
+        </a>
+      </div>
+
+      <!-- Card 2 — Fraude em Seguros -->
+      <div class="pub-card">
+        <span class="pub-card-type article">Mercado &amp; Fraude</span>
+        <h3>Fraude de imagem em seguros: como um arquivo JPEG pode custar R$ 1,1 bilhão por ano</h3>
+        <p class="pub-subtitle">Dados CNseg/SQF 2024 e as modalidades de fraude por imagem</p>
+        <p>R$ 41 bi em sinistros, R$ 5,4 bi suspeitos e R$ 1,1 bi comprovados ao ano. Veja como as principais modalidades de fraude por imagem operam, comparativos internacionais (ABI UK, CAIF EUA) e por que a captura autenticada C2PA + ICP-Brasil é a resposta na origem.</p>
+        <div class="pub-tags">
+          <span class="pub-tag article">Seguros</span>
+          <span class="pub-tag article">Fraude</span>
+          <span class="pub-tag article">CNseg</span>
+        </div>
+        <a href="/whitepapers/Provvi-Blog-Artigo2-Fraude-Seguros.pdf" download class="btn-primary">
+          &#8595; Baixar Artigo (PDF)
+        </a>
+      </div>
+
+      <!-- Card 3 — O que é C2PA -->
+      <div class="pub-card">
+        <span class="pub-card-type article">Tecnologia &amp; Padrões</span>
+        <h3>O que é C2PA e por que a Adobe, Microsoft e Google estão apostando nisso</h3>
+        <p class="pub-subtitle">O padrão que está se tornando infraestrutura global de confiança digital</p>
+        <p>Conheça o C2PA (Coalition for Content Provenance and Authenticity), fundado por Adobe, Microsoft, Google, Intel e BBC. Entenda como o manifesto criptográfico prova a origem, integridade e cadeia de custódia de qualquer mídia — e por que esse padrão é infraestrutura de confiança digital.</p>
+        <div class="pub-tags">
+          <span class="pub-tag article">C2PA</span>
+          <span class="pub-tag article">Autenticidade Digital</span>
+        </div>
+        <a href="/whitepapers/Provvi-Blog-Artigo1-C2PA.pdf" download class="btn-primary">
+          &#8595; Baixar Artigo (PDF)
+        </a>
       </div>
 
     </div>
