@@ -17,26 +17,84 @@ public sealed class ProvviCaptureResult
     public string ManifestJson { get; init; } = "";
     public string FrameHashHex { get; init; } = "";
     public bool LocationSuspicious { get; init; }
-    public long CapturedAtNanos { get; init; }
+    /// <summary>Timestamp da captura em milissegundos desde Unix epoch (System.currentTimeMillis()).</summary>
+    public long CapturedAtMs { get; init; }
     public bool HasIntegrityToken { get; init; }
     public string ManifestUrl { get; init; } = "";
+    /// <summary>true se a deriva entre CapturedAtMs e o relógio no momento da consolidação for superior a 300 s.</summary>
+    public bool ClockSuspicious { get; init; }
+    /// <summary>"NONE" | "MEDIUM" | "HIGH" — risco consolidado de recaptura.</summary>
+    public string IntegrityRisk { get; init; } = "NONE";
     public IReadOnlyDictionary<string, long> PipelineTimingsMs { get; init; }
         = new Dictionary<string, long>();
 }
 
 /// <summary>
-/// Erros possíveis retornados pelo SDK.
-/// Mapeados a partir dos subtipos de CaptureOutcome do Kotlin.
+/// Erros possíveis retornados pelo SDK (DT-019).
+/// Mapeados a partir de ProvviErrorType do SDK Kotlin.
+/// Os valores originais são preservados para compatibilidade com código existente.
 /// </summary>
 public enum ProvviErrorCode
 {
+    // --- Originais (mantidos para compatibilidade) ---
     PermissionDenied,
     DeviceCompromised,
     MockLocationDetected,
     RecaptureSuspected,
     SigningFailed,
     CaptureError,
-    Unknown
+    Unknown,
+
+    // --- Novos em DT-019 ---
+    /// <summary>Strongbox não disponível no hardware — não bloqueante.</summary>
+    StrongboxUnavailable,
+    /// <summary>Play Integrity API inacessível.</summary>
+    AttestationError,
+    /// <summary>Câmera física não encontrada.</summary>
+    CameraNotFound,
+    /// <summary>Câmera em uso exclusivo por outro processo.</summary>
+    CameraInUse,
+    /// <summary>Timeout: câmera não entregou frame em 10 s.</summary>
+    CameraTimeout,
+    /// <summary>Nenhuma fonte de localização respondeu.</summary>
+    LocationUnavailable,
+    /// <summary>Manifesto C2PA inválido ou não parseável.</summary>
+    ManifestInvalid,
+    /// <summary>Falha no cálculo do hash SHA-256 do frame.</summary>
+    FrameHashFailed,
+    /// <summary>Sem conexão de rede no momento da captura.</summary>
+    NetworkUnavailable,
+    /// <summary>Upload ao backend falhou após retentativas.</summary>
+    BackendUnavailable,
+    /// <summary>Backend retornou 401 — API Key inválida ou expirada.</summary>
+    BackendAuthFailed,
+    /// <summary>Timeout no upload ao backend.</summary>
+    BackendTimeout,
+    /// <summary>TSA inacessível após 3 tentativas com backoff.</summary>
+    TsaUnavailable,
+    /// <summary>Deriva de relógio superior a 300 s — possível manipulação.</summary>
+    ClockSuspicious,
+}
+
+/// <summary>
+/// Resultado de uma captura Provvi sem lançamento de exceções (DT-019).
+///
+/// Use com pattern matching:
+/// <code>
+/// var outcome = await capture.CaptureResultAsync("VHC-001", "App");
+/// if (outcome is ProvviCaptureOutcome.Success ok)
+///     Console.WriteLine(ok.Result.SessionId);
+/// else if (outcome is ProvviCaptureOutcome.Failure fail)
+///     Console.WriteLine($"Erro: {fail.Code} — {fail.Message}");
+/// </code>
+/// </summary>
+public abstract record ProvviCaptureOutcome
+{
+    /// <summary>Captura concluída com sucesso.</summary>
+    public sealed record Success(ProvviCaptureResult Result) : ProvviCaptureOutcome;
+
+    /// <summary>Captura falhou com código de erro classificado.</summary>
+    public sealed record Failure(ProvviErrorCode Code, string Message) : ProvviCaptureOutcome;
 }
 
 /// <summary>
@@ -149,9 +207,78 @@ public sealed class ProvviCapture : IDisposable
         return Task.Run(() => ExecuteHabilitAiCapture(request), cancellationToken);
     }
 
+    /// <summary>
+    /// Executa o pipeline completo de captura autenticada sem lançar exceções (DT-019).
+    ///
+    /// Retorna <see cref="ProvviCaptureOutcome.Success"/> em caso de sucesso ou
+    /// <see cref="ProvviCaptureOutcome.Failure"/> em qualquer falha classificada.
+    /// Prefira este método em código novo — <see cref="CaptureAsync"/> permanece
+    /// disponível para compatibilidade com código existente.
+    /// </summary>
+    /// <param name="referenceId">Identificador do objeto vistoriado.</param>
+    /// <param name="capturedBy">Nome do operador ou sistema que iniciou a captura.</param>
+    /// <param name="cancellationToken">Token para cancelamento (não propaga ao SDK Kotlin).</param>
+    public Task<ProvviCaptureOutcome> CaptureResultAsync(
+        string referenceId,
+        string capturedBy,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return Task.Run(() => ExecuteCaptureResult(referenceId, capturedBy), cancellationToken);
+    }
+
+    /// <summary>
+    /// Versão sem exceções da captura HabilitAi (DT-019).
+    /// </summary>
+    public Task<ProvviCaptureOutcome> CaptureHabilitAiResultAsync(
+        HabilitAiCaptureRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return Task.Run(() => ExecuteHabilitAiCaptureResult(request), cancellationToken);
+    }
+
     public void Dispose()
     {
         _disposed = true;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Implementações sem exceções (DT-019)
+    // ---------------------------------------------------------------------------
+
+    private ProvviCaptureOutcome ExecuteCaptureResult(string referenceId, string capturedBy)
+    {
+        try
+        {
+            return new ProvviCaptureOutcome.Success(ExecuteCapture(referenceId, capturedBy));
+        }
+        catch (ProvviCaptureException ex)
+        {
+            return new ProvviCaptureOutcome.Failure(ex.ErrorCode, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            return new ProvviCaptureOutcome.Failure(ProvviErrorCode.Unknown,
+                $"Erro inesperado: {ex.Message}");
+        }
+    }
+
+    private ProvviCaptureOutcome ExecuteHabilitAiCaptureResult(HabilitAiCaptureRequest request)
+    {
+        try
+        {
+            return new ProvviCaptureOutcome.Success(ExecuteHabilitAiCapture(request));
+        }
+        catch (ProvviCaptureException ex)
+        {
+            return new ProvviCaptureOutcome.Failure(ex.ErrorCode, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            return new ProvviCaptureOutcome.Failure(ProvviErrorCode.Unknown,
+                $"Erro inesperado: {ex.Message}");
+        }
     }
 
     // ---------------------------------------------------------------------------
@@ -343,15 +470,20 @@ public sealed class ProvviCapture : IDisposable
             return JNIEnv.CallBooleanMethod(session, id);
         }
 
+        // getDeviceIntegrityToken retorna String (vazia quando ausente) — HasIntegrityToken é derivado
+        var tokenStr = GetString("getDeviceIntegrityToken");
+
         return new ProvviCaptureResult
         {
             SessionId          = GetString("getSessionId"),
             ManifestJson       = GetString("getManifestJson"),
             FrameHashHex       = GetString("getFrameHashHex"),
             LocationSuspicious = GetBool("getLocationSuspicious"),
-            CapturedAtNanos    = GetLong("getCapturedAtNanos"),
-            HasIntegrityToken  = GetBool("getHasIntegrityToken"),
+            CapturedAtMs       = GetLong("getCapturedAtMs"),
+            HasIntegrityToken  = !string.IsNullOrEmpty(tokenStr),
             ManifestUrl        = GetString("getManifestUrl"),
+            ClockSuspicious    = GetBool("getClockSuspicious"),
+            IntegrityRisk      = GetString("getIntegrityRisk"),
             PipelineTimingsMs  = ExtractTimings(session, sessionClass),
         };
     }

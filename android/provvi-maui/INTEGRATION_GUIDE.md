@@ -1,5 +1,5 @@
 # Provvi SDK — Guia de Integração MAUI Android
-**Versão:** 1.0 | **Data:** 2026-03-06 | **Para:** Dev HabilitAi
+**Versão:** 1.1 | **Data:** 2026-03-12 | **Para:** Dev HabilitAi
 
 ## Pré-requisitos
 
@@ -71,8 +71,7 @@ private async Task CapturarBiometriaInicioAlunoAsync(string aulaId)
                 ManifestUrl = result.ManifestUrl,
                 FrameHash   = result.FrameHashHex,
                 Evento      = "student_start_biometry",
-                CapturedAt  = DateTimeOffset.FromUnixTimeMilliseconds(
-                                  result.CapturedAtNanos / 1_000_000)
+                CapturedAt  = DateTimeOffset.FromUnixTimeMilliseconds(result.CapturedAtMs)
             });
     }
     catch (ProvviCaptureException ex)
@@ -119,6 +118,63 @@ private async Task TratarErroCapturaAsync(ProvviCaptureException ex)
 }
 ```
 
+### 2.6 API sem exceções — ProvviCaptureOutcome (DT-019)
+
+`CaptureResultAsync` e `CaptureHabilitAiResultAsync` retornam `ProvviCaptureOutcome` em vez de
+lançar exceções. Use esta API em código novo para tratamento de erros mais explícito.
+
+```csharp
+private async Task CapturarComResultAsync(string aulaId)
+{
+    var outcome = await _capture.CaptureHabilitAiResultAsync(
+        new HabilitAiCaptureRequest
+        {
+            ClassId  = aulaId,
+            DeviceId = ObterDeviceId(),
+            Event    = HabilitAiEvent.StudentStartBiometry
+        });
+
+    switch (outcome)
+    {
+        case ProvviCaptureOutcome.Success ok:
+            await SalvarNoSupabase(ok.Result);
+            break;
+
+        case ProvviCaptureOutcome.Failure fail:
+            await TratarErroResultAsync(fail.Code, fail.Message);
+            break;
+    }
+}
+
+private async Task TratarErroResultAsync(ProvviErrorCode code, string message)
+{
+    var texto = code switch
+    {
+        ProvviErrorCode.PermissionDenied     => "Permissão negada. Habilite câmera e localização.",
+        ProvviErrorCode.DeviceCompromised    => "Dispositivo comprometido. Captura bloqueada.",
+        ProvviErrorCode.MockLocationDetected => "Localização simulada detectada.",
+        ProvviErrorCode.RecaptureSuspected   => "Fotografe o aluno/odômetro diretamente.",
+        ProvviErrorCode.NetworkUnavailable   => "Sem conexão. Verifique o Wi-Fi ou dados móveis.",
+        ProvviErrorCode.BackendUnavailable   => "Serviço temporariamente indisponível. Tente novamente.",
+        ProvviErrorCode.BackendAuthFailed    => "Chave de API inválida. Contate o suporte Provvi.",
+        ProvviErrorCode.TsaUnavailable       => "Serviço de timestamping indisponível. Tente novamente.",
+        ProvviErrorCode.SigningFailed        => $"Falha na assinatura: {message}",
+        _                                    => $"Erro: {message}"
+    };
+
+    await Shell.Current.DisplayAlert("Erro na Captura", texto, "OK");
+}
+```
+
+#### Quando usar cada API
+
+| Método                        | Retorno                  | Indicado para                          |
+|-------------------------------|--------------------------|----------------------------------------|
+| `CaptureAsync()`              | `ProvviCaptureResult`    | Código legado — lança `ProvviCaptureException` |
+| `CaptureResultAsync()`        | `ProvviCaptureOutcome`   | Código novo — sem exceções, pattern matching   |
+| `CaptureHabilitAiAsync()`     | `ProvviCaptureResult`    | HabilitAi — código legado              |
+| `CaptureHabilitAiResultAsync()` | `ProvviCaptureOutcome` | HabilitAi — código novo                |
+
 ### 2.5 Obter Device ID
 ```csharp
 private string ObterDeviceId()
@@ -152,15 +208,17 @@ Cada captura gera:
 
 ## 4. Campos retornados em ProvviCaptureResult
 
-| Campo                | Tipo                       | Descrição                           |
-|----------------------|----------------------------|-------------------------------------|
-| `SessionId`          | `string`                   | UUID único da captura               |
-| `ManifestJson`       | `string`                   | Manifesto C2PA completo             |
-| `FrameHashHex`       | `string`                   | SHA-256 do frame original           |
-| `ManifestUrl`        | `string`                   | URL S3 presigned (válida 7 dias)    |
-| `LocationSuspicious` | `bool`                     | GPS divergente ou mock detectado    |
-| `HasIntegrityToken`  | `bool`                     | Play Integrity disponível           |
-| `CapturedAtNanos`    | `long`                     | Timestamp do sensor (nanosegundos)  |
+| Campo                | Tipo                       | Descrição                                                |
+|----------------------|----------------------------|----------------------------------------------------------|
+| `SessionId`          | `string`                   | UUID único da captura                                    |
+| `ManifestJson`       | `string`                   | Manifesto C2PA completo                                  |
+| `FrameHashHex`       | `string`                   | SHA-256 do frame original                                |
+| `ManifestUrl`        | `string`                   | URL S3 presigned (válida 7 dias)                         |
+| `LocationSuspicious` | `bool`                     | GPS divergente ou mock detectado                         |
+| `HasIntegrityToken`  | `bool`                     | Play Integrity disponível                                |
+| `CapturedAtMs`       | `long`                     | Timestamp da captura (milissegundos desde Unix epoch)    |
+| `ClockSuspicious`    | `bool`                     | true se deriva de relógio > 300 s detectada              |
+| `IntegrityRisk`      | `string`                   | `"NONE"` \| `"MEDIUM"` \| `"HIGH"` — risco de recaptura |
 | `PipelineTimingsMs`  | `Dictionary<string, long>` | Tempo de cada camada (debug)        |
 
 ## 5. Atencao — Camera exclusiva

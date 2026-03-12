@@ -109,6 +109,8 @@ fn pdf_response(bytes: Vec<u8>) -> serde_json::Value {
         "headers": {
             "Content-Type": "application/pdf",
             "Content-Disposition": "inline; filename=\"provvi-certificate.pdf\"",
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
             "Access-Control-Allow-Origin": "*"
         },
         "body": b64,

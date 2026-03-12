@@ -173,6 +173,8 @@ struct VerifyResponse {
     signing_mode:        String,
     /// None = não foi possível verificar; Some(true/false) = resultado criptográfico
     icp_signature_valid: Option<bool>,
+    /// "granted" | "skipped" | "" — resultado da âncora temporal RFC 3161 (DT-016)
+    tsa_status:          String,
 }
 
 #[derive(Serialize)]
@@ -349,6 +351,7 @@ fn render_certificate_html(
     signing_mode:        &str,
     icp_signature_valid: Option<bool>,
     pdf_lambda_url:      &str,
+    tsa_status:          &str,   // "granted" | "skipped" | "" — DT-016
 ) -> String {
     let captured_by = if !captured_by_stored.is_empty() {
         captured_by_stored
@@ -385,6 +388,12 @@ fn render_certificate_html(
     let loc_label   = if location_suspicious { "Suspeita"           } else { "Verificada"  };
     let rec_icon    = if recapture_verdict == "clean" { "✅" } else { "⚠️" };
     let rec_label   = if recapture_verdict == "clean" { "Não detectada" } else { "Suspeita detectada" };
+
+    let (tsa_icon, tsa_label) = match tsa_status {
+        "granted" => ("✅", "Âncora temporal RFC 3161"),
+        "skipped" => ("ℹ️", "Âncora temporal — não configurada"),
+        _         => ("⚠️", "Âncora temporal ausente"),
+    };
 
     // Ícone de assinatura do servidor reflete ICP-Brasil quando disponível
     let (sig_check_icon, sig_check_label) = if icp_brasil {
@@ -430,9 +439,9 @@ fn render_certificate_html(
     let hash_html    = format_hash(frame_hash_hex);
     let date_str     = format_date(captured_at_iso);
     let generated_at = {
-        use chrono::{Datelike, Timelike, Utc};
-        let n = Utc::now();
-        format!("{:02}/{:02}/{} {:02}:{:02} UTC", n.day(), n.month(), n.year(), n.hour(), n.minute())
+        use chrono::{Duration, Datelike, Timelike, Utc};
+        let n = Utc::now() - Duration::hours(3); // UTC → BRT
+        format!("{:02}/{:02}/{} {:02}:{:02} BRT", n.day(), n.month(), n.year(), n.hour(), n.minute())
     };
 
     let captured_by_e  = html_escape(captured_by);
@@ -459,11 +468,12 @@ fn render_certificate_html(
     ));
 
     body.push_str(&format!(
-        r#"<div class="section"><div class="section-title">Verificações de Integridade</div><div class="check-list"><div class="check-item"><span class="check-icon">{ci}</span><span>Relógio do dispositivo — <strong>{cl}</strong></span></div><div class="check-item"><span class="check-icon">{li}</span><span>Localização GPS — <strong>{ll}</strong></span></div><div class="check-item"><span class="check-icon">{ri}</span><span>Detecção de recaptura — <strong>{rl}</strong></span></div><div class="check-item"><span class="check-icon">{ki}</span><span>Assinatura do servidor — <strong>{kl}</strong></span></div><div class="check-item"><span class="check-icon">🛡️</span><span>Risco geral — <span class="risk-badge {rbc}">{rbl}</span></span></div></div></div>"#,
+        r#"<div class="section"><div class="section-title">Verificações de Integridade</div><div class="check-list"><div class="check-item"><span class="check-icon">{ci}</span><span>Relógio do dispositivo — <strong>{cl}</strong></span></div><div class="check-item"><span class="check-icon">{li}</span><span>Localização GPS — <strong>{ll}</strong></span></div><div class="check-item"><span class="check-icon">{ri}</span><span>Detecção de recaptura — <strong>{rl}</strong></span></div><div class="check-item"><span class="check-icon">{ki}</span><span>Assinatura do servidor — <strong>{kl}</strong></span></div><div class="check-item"><span class="check-icon">{ti}</span><span>Carimbo de tempo — <strong>{tl}</strong></span></div><div class="check-item"><span class="check-icon">🛡️</span><span>Risco geral — <span class="risk-badge {rbc}">{rbl}</span></span></div></div></div>"#,
         ci = clock_icon,     cl = clock_label,
         li = loc_icon,       ll = loc_label,
         ri = rec_icon,       rl = rec_label,
         ki = sig_check_icon, kl = sig_check_label,
+        ti = tsa_icon,       tl = tsa_label,
         rbc = risk_class,    rbl = risk_label,
     ));
 
@@ -482,7 +492,7 @@ fn render_certificate_html(
         hash = hash_html
     ));
 
-    body.push_str(r#"<button class="print-btn no-print" onclick="window.print()">🖨&nbsp; Imprimir / Salvar PDF</button>"#);
+    body.push_str(r#"<button class="print-btn no-print" onclick="window.print()">🖨&nbsp; Imprimir Certificado</button>"#);
     if !pdf_lambda_url.is_empty() {
         let pdf_url = format!("{}?session_id={}", pdf_lambda_url.trim_end_matches('/'), session_id_e);
         body.push_str(&format!(
@@ -624,6 +634,7 @@ async fn handler(
             icp_valid_until:     String::new(),
             signing_mode:        String::new(),
             icp_signature_valid: None,
+            tsa_status:          String::new(),
         })?, 200));
     };
 
@@ -648,6 +659,7 @@ async fn handler(
     let signing_mode    = get_str(&item, "signing_mode");
     let icp_signature   = get_str(&item, "icp_signature");
     let manifest_s3_key = get_str(&item, "manifest_s3_key");
+    let tsa_status      = get_str(&item, "tsa_status");
 
     // Verifica hash da imagem se fornecida
     let frame_hash_match = image_hash.map(|h| h == frame_hash_hex);
@@ -707,30 +719,39 @@ async fn handler(
     // ------------------------------------------------------------------
     // Nota de verificação
     // ------------------------------------------------------------------
+    let tsa_note = if tsa_status == "granted" {
+        " Âncora temporal RFC 3161 presente."
+    } else if tsa_status.is_empty() || tsa_status == "skipped" {
+        " Âncora temporal RFC 3161 ausente."
+    } else {
+        ""
+    };
+
     let verification_note = if !valid {
         "Hash da imagem não confere. Imagem pode ter sido adulterada após a captura.".to_string()
     } else {
-        match (frame_hash_match, icp_brasil, icp_signature_valid) {
+        let base = match (frame_hash_match, icp_brasil, icp_signature_valid) {
             (Some(true), true, Some(true)) =>
-                "Imagem autêntica. Hash verificado e assinado com certificado ICP-Brasil válido.".to_string(),
+                "Imagem autêntica. Hash verificado e assinado com certificado ICP-Brasil válido.",
             (Some(true), true, Some(false)) =>
-                "Imagem autêntica. Hash verificado. Falha na verificação criptográfica da assinatura ICP-Brasil.".to_string(),
+                "Imagem autêntica. Hash verificado. Falha na verificação criptográfica da assinatura ICP-Brasil.",
             (Some(true), true, None) =>
-                "Imagem autêntica. Hash verificado com assinatura ICP-Brasil A1.".to_string(),
+                "Imagem autêntica. Hash verificado com assinatura ICP-Brasil A1.",
             (Some(true), false, _) if kms_signed =>
-                "Imagem autêntica. Hash verificado. Assinatura KMS presente (certificado ICP-Brasil pendente).".to_string(),
+                "Imagem autêntica. Hash verificado. Assinatura KMS presente (certificado ICP-Brasil pendente).",
             (Some(true), false, _) =>
-                "Imagem autêntica. Hash verificado com assinatura local.".to_string(),
+                "Imagem autêntica. Hash verificado com assinatura local.",
             (None, true, Some(true)) =>
-                "Sessão encontrada com assinatura ICP-Brasil válida. Envie a imagem para verificação completa do hash.".to_string(),
+                "Sessão encontrada com assinatura ICP-Brasil válida. Envie a imagem para verificação completa do hash.",
             (None, true, _) =>
-                "Sessão encontrada com assinatura ICP-Brasil A1. Envie a imagem para verificação completa do hash.".to_string(),
+                "Sessão encontrada com assinatura ICP-Brasil A1. Envie a imagem para verificação completa do hash.",
             (None, false, _) if kms_signed =>
-                "Sessão encontrada e assinada digitalmente via KMS. Envie a imagem para verificação completa do hash.".to_string(),
+                "Sessão encontrada e assinada digitalmente via KMS. Envie a imagem para verificação completa do hash.",
             (None, false, _) =>
-                "Sessão encontrada com assinatura local. Envie a imagem para verificação completa do hash.".to_string(),
-            _ => "Verificação inconclusiva.".to_string(),
-        }
+                "Sessão encontrada com assinatura local. Envie a imagem para verificação completa do hash.",
+            _ => "Verificação inconclusiva.",
+        };
+        format!("{base}{tsa_note}")
     };
 
     // Converte captured_at (ms epoch) para ISO 8601
@@ -768,6 +789,7 @@ async fn handler(
             icp_brasil, &icp_subject, &icp_cnpj, &icp_valid_until,
             &signing_mode, icp_signature_valid,
             &pdf_lambda_url,
+            &tsa_status,
         );
         return Ok(html_response(html, 200));
     }
@@ -790,6 +812,7 @@ async fn handler(
         icp_valid_until,
         signing_mode,
         icp_signature_valid,
+        tsa_status,
     })?, 200))
 }
 

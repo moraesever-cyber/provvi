@@ -35,6 +35,10 @@ private const val PROVVI_DEFAULT_CLOUD_PROJECT = 0L
  * @param cloudProjectNumber   Número do projeto Google Cloud com a Play Integrity API habilitada.
  *                             Padrão: projeto Provvi (configurado internamente).
  *                             Integradores com projeto próprio podem substituir este valor.
+ *
+ *                             **Atenção (DT-020):** deve ser o mesmo valor de
+ *                             [br.com.provvi.ProvviConfig.cloudProjectNumber].
+ *                             Manter os dois em sincronia ao preencher o número real de produção.
  */
 data class BackendConfig(
     val lambdaUrl:           String,
@@ -46,6 +50,18 @@ data class BackendConfig(
 // ---------------------------------------------------------------------------
 // Resultado do upload
 // ---------------------------------------------------------------------------
+
+/**
+ * Classificação de erros de backend para tratamento programático (DT-017).
+ */
+enum class BackendErrorType {
+    /** Erro genérico de servidor ou rede. */
+    GENERIC,
+    /** Backend retornou 503 com body `"error": "TSA_UNAVAILABLE"` — âncora temporal indisponível. */
+    TSA_UNAVAILABLE,
+    /** Backend retornou 401 — API Key inválida ou expirada (DT-005/008). */
+    AUTH_FAILED
+}
 
 /**
  * Resultado do envio de uma sessão de captura ao backend.
@@ -71,10 +87,12 @@ sealed class BackendResult {
      * @param message     Descrição do erro para log interno — não exibir ao usuário final.
      * @param isRetryable true para erros 5xx e falhas de rede (retry faz sentido);
      *                    false para erros 4xx (payload inválido, sem retry).
+     * @param errorType   Classificação do erro para tratamento programático (DT-017).
      */
     data class Error(
         val message:     String,
-        val isRetryable: Boolean
+        val isRetryable: Boolean,
+        val errorType:   BackendErrorType = BackendErrorType.GENERIC
     ) : BackendResult()
 }
 
@@ -133,6 +151,14 @@ class ProvviBackendClient(private val config: BackendConfig) {
 
             when (responseCode) {
                 in 200..299 -> parseSuccess(responseBody)
+                401 -> {
+                    Log.w(TAG, "Erro 401 ao enviar sessão ${session.sessionId}: API Key inválida ou expirada")
+                    BackendResult.Error(
+                        message     = "API Key inválida ou expirada",
+                        isRetryable = false,
+                        errorType   = BackendErrorType.AUTH_FAILED
+                    )
+                }
                 in 400..499 -> {
                     // Erro de cliente — payload inválido, sem retry
                     Log.w(TAG, "Erro HTTP $responseCode ao enviar sessão ${session.sessionId}: $responseBody")
@@ -141,8 +167,29 @@ class ProvviBackendClient(private val config: BackendConfig) {
                         isRetryable = false
                     )
                 }
+                503 -> {
+                    // Verificar se é falha de TSA (DT-017)
+                    val isTsaError = try {
+                        org.json.JSONObject(responseBody).getString("error") == "TSA_UNAVAILABLE"
+                    } catch (_: Exception) { false }
+
+                    if (isTsaError) {
+                        Log.w(TAG, "TSA indisponível ao enviar sessão ${session.sessionId}")
+                        BackendResult.Error(
+                            message     = "TSA indisponível — âncora temporal não obtida. Tente novamente.",
+                            isRetryable = true,
+                            errorType   = BackendErrorType.TSA_UNAVAILABLE
+                        )
+                    } else {
+                        Log.w(TAG, "Erro HTTP 503 ao enviar sessão ${session.sessionId}: $responseBody")
+                        BackendResult.Error(
+                            message     = "Serviço temporariamente indisponível: $responseBody",
+                            isRetryable = true
+                        )
+                    }
+                }
                 else -> {
-                    // Erro de servidor (5xx) ou inesperado — retry pode resolver
+                    // Outros erros de servidor (5xx) — retry pode resolver
                     Log.w(TAG, "Erro HTTP $responseCode ao enviar sessão ${session.sessionId}: $responseBody")
                     BackendResult.Error(
                         message     = "Erro HTTP $responseCode: $responseBody",
