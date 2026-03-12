@@ -19,17 +19,28 @@ private const val TAG = "ProvviBackendClient"
 // Configuração
 // ---------------------------------------------------------------------------
 
+// TODO: preencher após abertura de conta corporativa na Play Store.
+//       Obter em: console.cloud.google.com → APIs e Serviços → Play Integrity API.
+//       Enquanto 0L, o pré-aquecimento da Play Integrity é ignorado e o campo
+//       "Play Integrity" no manifesto C2PA ficará como "Indisponível".
+private const val PROVVI_DEFAULT_CLOUD_PROJECT = 0L
+
 /**
  * Parâmetros de conexão com o backend de armazenamento de sessões.
  *
- * @param lambdaUrl      URL da Lambda (Function URL direta ou API Gateway).
- *                       Exemplo: "https://xyz.lambda-url.sa-east-1.on.aws/"
- * @param timeoutSeconds Timeout total da requisição HTTP em segundos. Padrão: 30.
+ * @param lambdaUrl            URL da Lambda (Function URL direta ou API Gateway).
+ *                             Exemplo: "https://xyz.lambda-url.sa-east-1.on.aws/"
+ * @param timeoutSeconds       Timeout total da requisição HTTP em segundos. Padrão: 30.
+ * @param apiKey               Chave de autenticação enviada no header x-api-key.
+ * @param cloudProjectNumber   Número do projeto Google Cloud com a Play Integrity API habilitada.
+ *                             Padrão: projeto Provvi (configurado internamente).
+ *                             Integradores com projeto próprio podem substituir este valor.
  */
 data class BackendConfig(
-    val lambdaUrl:      String,
-    val timeoutSeconds: Long   = 30,
-    val apiKey:         String = ""
+    val lambdaUrl:           String,
+    val timeoutSeconds:      Long   = 30,
+    val apiKey:              String = "",
+    val cloudProjectNumber:  Long   = PROVVI_DEFAULT_CLOUD_PROJECT
 )
 
 // ---------------------------------------------------------------------------
@@ -188,7 +199,7 @@ class ProvviBackendClient(private val config: BackendConfig) {
             put("image_base64",      imageBase64)
             put("manifest_json",     session.manifestJson)
             put("frame_hash_hex",    session.frameHashHex)
-            put("captured_at_nanos", session.capturedAtNanos)
+            put("captured_at_ms",    session.capturedAtMs)
             put("assertions",        assertionsJson)
         }.toString()
     }

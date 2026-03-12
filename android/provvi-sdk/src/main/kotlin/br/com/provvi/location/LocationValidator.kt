@@ -75,7 +75,8 @@ sealed class LocationValidationOutcome {
 class LocationValidator(private val context: Context) {
 
     // Timeout individual para cada fonte de localização
-    private val sourceTimeoutMillis = 3_000L
+    // 1.5s — suficiente para NETWORK; GPS tenta mas não bloqueia em ambiente fechado
+    private val sourceTimeoutMillis = 1_500L
 
     // Limiar de divergência entre fontes definido no ADR-001 (camada 3.5)
     private val divergenceThresholdMeters = 500f
@@ -97,7 +98,17 @@ class LocationValidator(private val context: Context) {
         val manager = locationManager
             ?: return LocationValidationOutcome.LocationUnavailable
 
-        // Paralelize GPS e NETWORK — ambos independentes entre si
+        // Tenta last known de ambas as fontes antes de aguardar atualização.
+        // Isso é O(1) e resolve o caso mais comum (app já estava rodando ou
+        // outra sessão usou localização nos últimos 5 minutos).
+        val lastGps     = getLastKnownFresh(manager, LocationManager.GPS_PROVIDER)
+        val lastNetwork = getLastKnownFresh(manager, LocationManager.NETWORK_PROVIDER)
+
+        if (lastGps != null || lastNetwork != null) {
+            return buildOutcome(lastGps, lastNetwork)
+        }
+
+        // Sem cache — aguarda nova atualização em paralelo com timeout reduzido
         val (gpsLocation, networkLocation) = coroutineScope {
             val gpsDeferred = async(Dispatchers.IO) {
                 requestLocation(manager, LocationManager.GPS_PROVIDER)
@@ -108,23 +119,26 @@ class LocationValidator(private val context: Context) {
             Pair(gpsDeferred.await(), networkDeferred.await())
         }
 
-        // Nenhuma fonte respondeu dentro do timeout
         if (gpsLocation == null && networkLocation == null) {
             return LocationValidationOutcome.LocationUnavailable
         }
 
-        // Monta a lista das fontes que efetivamente responderam
+        return buildOutcome(gpsLocation, networkLocation)
+    }
+
+    /**
+     * Constrói o [LocationValidationOutcome] a partir de duas fontes opcionais.
+     * Extrai a lógica de consolidação para evitar duplicação entre o caminho de
+     * cache e o caminho de espera.
+     */
+    private fun buildOutcome(gps: Location?, network: Location?): LocationValidationOutcome {
         val sourcesUsed = buildList {
-            if (gpsLocation != null)     add("GPS")
-            if (networkLocation != null) add("NETWORK")
+            if (gps != null)     add("GPS")
+            if (network != null) add("NETWORK")
         }
-
-        // Calcula a divergência entre as fontes disponíveis
-        val divergenceMeters = calculateDivergence(gpsLocation, networkLocation)
+        val divergenceMeters   = calculateDivergence(gps, network)
         val locationSuspicious = divergenceMeters > divergenceThresholdMeters
-
-        // GPS tem prioridade como coordenada consolidada; NETWORK é fallback
-        val primary = gpsLocation ?: networkLocation!!
+        val primary            = gps ?: network!!
 
         val result = LocationResult(
             latitude           = primary.latitude,
@@ -136,12 +150,22 @@ class LocationValidator(private val context: Context) {
             sourcesUsed        = sourcesUsed
         )
 
-        // Mock detectado é reportado como outcome distinto para tratamento explícito
         return if (result.isMockLocation) {
             LocationValidationOutcome.MockDetected(result)
         } else {
             LocationValidationOutcome.Valid(result)
         }
+    }
+
+    /**
+     * Retorna a última localização conhecida do provider se estiver dentro da janela
+     * de frescor, ou null caso o provider esteja desativado ou o cache seja muito antigo.
+     */
+    @Suppress("MissingPermission")
+    private fun getLastKnownFresh(manager: LocationManager, provider: String): Location? {
+        if (!manager.isProviderEnabled(provider)) return null
+        val last = manager.getLastKnownLocation(provider) ?: return null
+        return if (isLocationFresh(last)) last else null
     }
 
     /**
@@ -188,11 +212,9 @@ class LocationValidator(private val context: Context) {
         // Provider desabilitado nas configurações do dispositivo — não tenta registrar listener
         if (!manager.isProviderEnabled(provider)) return null
 
-        // Tenta usar a última localização conhecida se for recente o suficiente (< 30 segundos)
-        val lastKnown = manager.getLastKnownLocation(provider)
-        if (lastKnown != null && isLocationFresh(lastKnown)) return lastKnown
+        // Verificação de lastKnown removida daqui — tratada em validate() via getLastKnownFresh()
+        // antes de entrar no fluxo de espera, evitando duplicação.
 
-        // Aguarda nova atualização de localização com timeout global de 5 segundos
         return withTimeoutOrNull(sourceTimeoutMillis) {
             suspendCancellableCoroutine { continuation ->
                 val listener = object : LocationListener {
@@ -225,12 +247,13 @@ class LocationValidator(private val context: Context) {
     }
 
     /**
-     * Verifica se uma localização foi obtida recentemente (menos de 30 segundos atrás).
-     * Localizações muito antigas não são confiáveis para uma vistoria em andamento.
+     * Verifica se uma localização foi obtida recentemente (menos de 5 minutos atrás).
+     * Janela ampliada de 30s para 5min — reduz necessidade de aguardar nova atualização
+     * em sessões iniciadas pouco depois de outra sessão ter usado localização.
      */
     private fun isLocationFresh(location: Location): Boolean {
         val ageMillis = System.currentTimeMillis() - location.time
-        return ageMillis < 30_000L
+        return ageMillis < 300_000L
     }
 
     /**

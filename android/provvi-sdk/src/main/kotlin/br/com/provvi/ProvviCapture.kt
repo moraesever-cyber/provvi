@@ -24,15 +24,40 @@ import br.com.provvi.recapture.RecaptureIndicator
 import br.com.provvi.security.DeviceIntegrityChecker
 import br.com.provvi.security.DeviceVerdict
 import br.com.provvi.security.IntegrityResult
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
 import java.util.UUID
+
+// ---------------------------------------------------------------------------
+// Configuração do SDK
+// ---------------------------------------------------------------------------
+
+// TODO: preencher após abertura de conta corporativa na Play Store.
+//       Enquanto 0L, o pré-aquecimento da Play Integrity é ignorado e o campo
+//       "Play Integrity" no manifesto C2PA ficará como "Indisponível".
+private const val PROVVI_DEFAULT_CLOUD_PROJECT = 0L
+
+/**
+ * Configuração do Provvi SDK fornecida pelo integrador na inicialização.
+ *
+ * @param cloudProjectNumber Número do projeto Google Cloud com a Play Integrity API habilitada.
+ *                           Padrão: projeto Provvi (será preenchido após abertura de conta).
+ *                           Integradores com projeto Google Cloud próprio podem substituir.
+ *
+ * **Instancie [ProvviCapture] o mais cedo possível na Activity** (em `onCreate` ou `onResume`)
+ * para que o pré-aquecimento da Play Integrity API complete antes da primeira captura.
+ */
+class ProvviConfig(
+    val cloudProjectNumber: Long = PROVVI_DEFAULT_CLOUD_PROJECT
+)
 
 // ---------------------------------------------------------------------------
 // Tipos públicos da sessão e resultado de captura
@@ -51,9 +76,18 @@ import java.util.UUID
  * @param locationSuspicious    true se divergência GPS × NETWORK > 500 m (Camada 3.5).
  * @param deviceIntegrityToken  Token JWT da Play Integrity API para validação no backend (Camada 2).
  *                              Vazio se a API não estava disponível.
- * @param capturedAtNanos       Timestamp de captura em nanosegundos, origem: sensor da câmera.
+ * @param capturedAtMs          Timestamp de captura em milissegundos desde Unix epoch
+ *                              (System.currentTimeMillis() no momento do frame).
+ * @param clockSuspicious       true se a deriva entre capturedAtMs e o relógio no momento
+ *                              da consolidação for superior a 300 segundos — indica possível
+ *                              manipulação de relógio ou frame stale.
  * @param manifestUrl           URL presigned S3 do manifesto após upload ao backend.
  *                              null se [ProvviBackendClient] não foi fornecido ou se o upload falhou.
+ * @param integrityRisk         Nível de risco consolidado da sessão, incluído no manifesto C2PA.
+ *                              "NONE"   — nenhum indicador de fraude detectado.
+ *                              "MEDIUM" — score entre THRESHOLD_SUSPICIOUS e THRESHOLD_BLOCK;
+ *                                         sessão prosseguiu para decisão da seguradora.
+ *                              "HIGH"   — reservado para bloqueios futuros com evidência registrada.
  */
 data class CaptureSession(
     val sessionId: String,
@@ -62,10 +96,12 @@ data class CaptureSession(
     val frameHashHex: String,
     val locationSuspicious: Boolean,
     val deviceIntegrityToken: String,
-    val capturedAtNanos: Long,
+    val capturedAtMs: Long,
+    val clockSuspicious: Boolean = false,
     val manifestUrl: String? = null,
     /** Tempo gasto em cada camada do pipeline, em milissegundos (DT-001). */
-    val pipelineTimingsMs: Map<String, Long>? = null
+    val pipelineTimingsMs: Map<String, Long>? = null,
+    val integrityRisk: String = "NONE"
 ) {
     // Gerado — necessário para data class com ByteArray
     override fun equals(other: Any?): Boolean {
@@ -77,9 +113,11 @@ data class CaptureSession(
                frameHashHex == other.frameHashHex &&
                locationSuspicious == other.locationSuspicious &&
                deviceIntegrityToken == other.deviceIntegrityToken &&
-               capturedAtNanos == other.capturedAtNanos &&
+               capturedAtMs == other.capturedAtMs &&
+               clockSuspicious == other.clockSuspicious &&
                manifestUrl == other.manifestUrl &&
-               pipelineTimingsMs == other.pipelineTimingsMs
+               pipelineTimingsMs == other.pipelineTimingsMs &&
+               integrityRisk == other.integrityRisk
     }
 
     override fun hashCode(): Int {
@@ -89,9 +127,11 @@ data class CaptureSession(
         result = 31 * result + frameHashHex.hashCode()
         result = 31 * result + locationSuspicious.hashCode()
         result = 31 * result + deviceIntegrityToken.hashCode()
-        result = 31 * result + capturedAtNanos.hashCode()
+        result = 31 * result + capturedAtMs.hashCode()
+        result = 31 * result + clockSuspicious.hashCode()
         result = 31 * result + manifestUrl.hashCode()
         result = 31 * result + pipelineTimingsMs.hashCode()
+        result = 31 * result + integrityRisk.hashCode()
         return result
     }
 }
@@ -144,12 +184,42 @@ sealed class CaptureOutcome {
  * o [LifecycleOwner] passado a [capture], que controla a duração da sessão de câmera.
  */
 @OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
-class ProvviCapture(context: Context) {
+class ProvviCapture(
+    context: Context,
+    private val config: ProvviConfig = ProvviConfig()
+) {
 
     private val integrityChecker  = DeviceIntegrityChecker(context)
     private val locationValidator = LocationValidator(context)
     private val cameraCapture     = SecureCameraCapture(context)
     private val c2paEngine        = C2paEngine()
+
+    init {
+        // Dispara o pré-aquecimento da Standard Play Integrity API imediatamente ao
+        // criar o ProvviCapture — sem bloquear a inicialização. A operação de rede
+        // (~2–5s) ocorre em background enquanto o usuário preenche os dados da vistoria.
+        // Quando capture() for chamado, o token já estará pronto (~150ms).
+        CoroutineScope(Dispatchers.IO).launch {
+            if (!integrityChecker.isReady()) {
+                integrityChecker.warmUp(config.cloudProjectNumber)
+            }
+        }
+    }
+
+    /**
+     * Pré-aquece explicitamente o token provider da Standard Play Integrity API.
+     *
+     * O pré-aquecimento também é disparado automaticamente no `init` do [ProvviCapture].
+     * Este método existe para integradores que precisam aguardar a conclusão antes de
+     * prosseguir, ou para forçar nova tentativa em caso de falha silenciosa.
+     *
+     * Seguro para chamar múltiplas vezes — chamadas subsequentes são ignoradas se o
+     * provider já estiver pronto.
+     */
+    suspend fun prepare() {
+        if (integrityChecker.isReady()) return
+        integrityChecker.warmUp(config.cloudProjectNumber)
+    }
 
     /**
      * Executa o pipeline de captura autenticada e retorna uma [CaptureSession] assinada.
@@ -190,7 +260,7 @@ class ProvviCapture(context: Context) {
         val parallelOutput = coroutineScope {
             val integrityDeferred = async(Dispatchers.Default) {
                 val t = System.nanoTime()
-                val result = integrityChecker.check(nonce = sessionId)
+                val result = integrityChecker.check(requestHash = sessionId)
                 Pair(result, (System.nanoTime() - t) / 1_000_000L)
             }
 
@@ -292,6 +362,15 @@ class ProvviCapture(context: Context) {
         val successFrame = firstFrame as CaptureResult.Success
 
         // -----------------------------------------------------------------
+        // Verificação de deriva de relógio.
+        // Compara o timestamp registrado no frame (System.currentTimeMillis() no analyzer)
+        // com o relógio atual. Deriva > 300 s sugere manipulação de relógio ou frame stale.
+        // -----------------------------------------------------------------
+        val clockCheckMs = System.currentTimeMillis()
+        val clockDriftMs = Math.abs(clockCheckMs - successFrame.capturedAtMs)
+        val clockSuspicious = clockDriftMs > 300_000L
+
+        // -----------------------------------------------------------------
         // ADR-002 Caminho 1: Detecção de recaptura por artefatos físicos de tela.
         //
         // Executada ANTES de yuvToJpeg() enquanto os buffers YUV ainda são válidos
@@ -304,8 +383,13 @@ class ProvviCapture(context: Context) {
         }
         val recaptureAnalysisMs = (System.nanoTime() - t0Recapture) / 1_000_000L
 
-        if (recaptureAnalysis is RecaptureAnalysis.Suspicious) {
-            // Libera recursos antes de retornar — mesma sequência do caminho de erro normal
+        // Sistema de dois limiares (ADR-002 v1.2):
+        // - score > THRESHOLD_BLOCK  → bloqueia imediatamente (alta confiança)
+        // - score > THRESHOLD_SUSPICIOUS → prossegue, manifesto flagado como MEDIUM
+        //   A seguradora recebe a evidência completa e decide sobre o sinistro.
+        val integrityRisk: String
+        if (recaptureAnalysis is RecaptureAnalysis.Suspicious &&
+            recaptureAnalysis.score > RecaptureDetector.THRESHOLD_BLOCK) {
             successFrame.imageProxy.close()
             cameraCapture.stopCapture()
             frameChannel.close()
@@ -313,7 +397,14 @@ class ProvviCapture(context: Context) {
                 score      = recaptureAnalysis.score,
                 indicators = recaptureAnalysis.indicators
             )
+        } else if (recaptureAnalysis is RecaptureAnalysis.Suspicious) {
+            integrityRisk = "MEDIUM"
+        } else {
+            integrityRisk = "NONE"
         }
+
+        // Captura rotação do sensor antes de liberar o ImageProxy
+        val rotationDegrees = successFrame.imageProxy.imageInfo.rotationDegrees
 
         // Converte o frame YUV_420_888 para JPEG antes de liberar a sessão de câmera
         val t0Jpeg = System.nanoTime()
@@ -340,6 +431,10 @@ class ProvviCapture(context: Context) {
             // Camada 3: hash do frame RAW (pré-codec)
             putAll(successFrame.frameHash.toManifestAssertion())
 
+            // Timestamp de relógio de parede e flag de deriva
+            put("captured_at_epoch_ms", successFrame.capturedAtMs)
+            put("clock_suspicious", clockSuspicious)
+
             // Identificação do hardware de câmera para auditoria
             put("physical_camera_id", successFrame.physicalCameraId)
 
@@ -357,9 +452,10 @@ class ProvviCapture(context: Context) {
                 put("device_integrity_unavailable", true)
             }
 
-            // ADR-002 Caminho 1: resultado da análise de recaptura (Clean ou Inconclusive aqui,
-            // pois Suspicious já retornou mais cedo no pipeline)
+            // ADR-002 Caminho 1: resultado da análise de recaptura.
+            // Suspicious com score <= THRESHOLD_BLOCK prossegue aqui com integrityRisk=MEDIUM.
             putAll(RecaptureDetector.toManifestAssertion(recaptureAnalysis))
+            put("integrity_risk", integrityRisk)
 
             // Asserções do integrador — convertidas via ProvviAssertions.toMap()
             putAll(assertions.toMap())
@@ -380,7 +476,10 @@ class ProvviCapture(context: Context) {
         // O manifesto é assinado com Ed25519 (dev) ou ICP-Brasil (produção).
         // -----------------------------------------------------------------
         val t0Signing = System.nanoTime()
-        val signingResult = c2paEngine.sign(jpegBytes, allAssertions)
+        val jpegWithExif = withContext(Dispatchers.Default) {
+            insertExifOrientation(jpegBytes, rotationDegrees)
+        }
+        val signingResult = c2paEngine.sign(jpegWithExif, allAssertions)
 
         val c2paSigningMs = (System.nanoTime() - t0Signing) / 1_000_000L
 
@@ -394,12 +493,14 @@ class ProvviCapture(context: Context) {
         var session = CaptureSession(
             sessionId            = sessionId,
             manifestJson         = signed.manifestJson,
-            imageJpegBytes       = jpegBytes,
+            imageJpegBytes       = jpegWithExif,
             frameHashHex         = successFrame.frameHash.rawHashHex,
             locationSuspicious   = locationResult?.locationSuspicious ?: false,
             deviceIntegrityToken = integrityToken,
-            capturedAtNanos      = successFrame.frameHash.timestampNanos,
-            manifestUrl          = null
+            capturedAtMs         = successFrame.capturedAtMs,
+            clockSuspicious      = clockSuspicious,
+            manifestUrl          = null,
+            integrityRisk        = integrityRisk
         )
 
         // -----------------------------------------------------------------
@@ -542,5 +643,88 @@ class ProvviCapture(context: Context) {
         val outputStream = ByteArrayOutputStream()
         yuvImage.compressToJpeg(Rect(0, 0, width, height), quality, outputStream)
         return outputStream.toByteArray()
+    }
+
+    /**
+     * Insere o tag EXIF Orientation no JPEG gerado pelo sensor.
+     *
+     * CameraX não grava EXIF nos bytes retornados por yuvToJpeg() — o campo
+     * imageInfo.rotationDegrees indica quantos graus o frame deve ser rotacionado
+     * para ficar "de pé". Sem esse tag, visualizadores que respeitam EXIF (browsers,
+     * S3 Object Viewer, iOS Photos) exibem a foto rotacionada 90°.
+     *
+     * A assinatura C2PA cobre jpegWithExif (objeto real armazenado no S3).
+     * frameHashHex continua sendo SHA-256 do buffer YUV bruto — não é afetado.
+     */
+    private fun insertExifOrientation(jpegBytes: ByteArray, rotationDegrees: Int): ByteArray {
+        val exifOrientation = when (rotationDegrees) {
+            0   -> androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+            90  -> androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90
+            180 -> androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180
+            270 -> androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270
+            else -> androidx.exifinterface.media.ExifInterface.ORIENTATION_UNDEFINED
+        }
+        if (exifOrientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL ||
+            exifOrientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_UNDEFINED) {
+            return jpegBytes
+        }
+        return try {
+            insertExifViaRewrite(jpegBytes, exifOrientation)
+        } catch (e: Exception) {
+            android.util.Log.w("ProvviCapture", "insertExifOrientation falhou: ${e.message} — retornando JPEG original")
+            jpegBytes
+        }
+    }
+
+    /**
+     * Reescreve o JPEG inserindo um segmento APP1 com EXIF Orientation.
+     *
+     * Estrutura: SOI (2 bytes) + APP1 (marker + length + "Exif\0\0" + TIFF IFD) + resto do JPEG.
+     * Qualquer APP1 preexistente no JPEG de origem é preservado logo após o novo.
+     */
+    private fun insertExifViaRewrite(jpegBytes: ByteArray, exifOrientation: Int): ByteArray {
+        val tiffData    = buildExifOrientationBlock(exifOrientation)
+        val exifHeader  = byteArrayOf(0x45, 0x78, 0x69, 0x66, 0x00, 0x00) // "Exif\0\0"
+        val app1Content = exifHeader + tiffData
+        val app1Length  = app1Content.size + 2
+        val app1Marker  = byteArrayOf(
+            0xFF.toByte(), 0xE1.toByte(),
+            ((app1Length shr 8) and 0xFF).toByte(),
+            (app1Length and 0xFF).toByte()
+        )
+        val app1Segment = app1Marker + app1Content
+        val soi  = jpegBytes.copyOfRange(0, 2)
+        val rest = jpegBytes.copyOfRange(2, jpegBytes.size)
+        return soi + app1Segment + rest
+    }
+
+    /**
+     * Constrói um bloco TIFF little-endian com um único IFD contendo apenas
+     * o tag 0x0112 (Orientation).
+     *
+     * Estrutura TIFF:
+     *   - Header (8 bytes): "II" + magic 0x002A + offset do IFD (0x00000008)
+     *   - IFD entry count (2 bytes): 1
+     *   - IFD entry (12 bytes): tag + type SHORT + count 1 + value
+     *   - Next IFD offset (4 bytes): 0 (fim)
+     */
+    private fun buildExifOrientationBlock(orientation: Int): ByteArray {
+        val header = byteArrayOf(
+            0x49, 0x49,             // "II" — little-endian
+            0x2A, 0x00,             // TIFF magic
+            0x08, 0x00, 0x00, 0x00  // Offset do primeiro IFD = 8
+        )
+        val entryCount = byteArrayOf(0x01, 0x00)
+        val orientValue = orientation and 0xFFFF
+        val ifdEntry = byteArrayOf(
+            0x12, 0x01,             // Tag 0x0112 (Orientation)
+            0x03, 0x00,             // Type SHORT
+            0x01, 0x00, 0x00, 0x00, // Count = 1
+            (orientValue and 0xFF).toByte(),
+            ((orientValue shr 8) and 0xFF).toByte(),
+            0x00, 0x00
+        )
+        val nextIfd = byteArrayOf(0x00, 0x00, 0x00, 0x00)
+        return header + entryCount + ifdEntry + nextIfd
     }
 }

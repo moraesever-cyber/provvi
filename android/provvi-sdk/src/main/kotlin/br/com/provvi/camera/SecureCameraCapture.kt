@@ -25,7 +25,8 @@ sealed class CaptureResult {
     data class Success(
         val imageProxy: ImageProxy,
         val frameHash: FrameHash,
-        val physicalCameraId: String
+        val physicalCameraId: String,
+        val capturedAtMs: Long
     ) : CaptureResult()
     data class Error(val reason: CaptureError) : CaptureResult()
 }
@@ -152,6 +153,11 @@ class SecureCameraCapture(private val context: Context) {
                 .build()
                 .also { analysis ->
                     analysis.setAnalyzer(analysisExecutor) { imageProxy ->
+                        // Timestamp de relógio de parede capturado imediatamente ao receber o frame.
+                        // Usa System.currentTimeMillis() (epoch Unix em ms) em vez de
+                        // imageProxy.imageInfo.timestamp (clock monotônico desde o boot — não é Unix epoch).
+                        val capturedAtMs = System.currentTimeMillis()
+
                         // Camadas 1 e 3 do ADR-001 integradas aqui:
                         // Camada 1 — frame chega diretamente do pipeline Camera2, sem passar
                         //            pelo codec do SO (YUV_420_888, pré-compressão).
@@ -159,7 +165,7 @@ class SecureCameraCapture(private val context: Context) {
                         //            de qualquer transformação, garantindo que o manifesto
                         //            C2PA referencia o dado original do sensor.
                         val frameHash = FrameHasher.computeHash(imageProxy)
-                        onFrameCaptured(CaptureResult.Success(imageProxy, frameHash, physicalCameraId))
+                        onFrameCaptured(CaptureResult.Success(imageProxy, frameHash, physicalCameraId, capturedAtMs))
                     }
                 }
 
