@@ -34,32 +34,35 @@ Baseline: cold start ~7s, warm ~3.5s, GPS dominante ~3s.
 
 ---
 
-## DT-002 — Play Integrity sem cloudProjectNumber
-**Prioridade:** Alta | **Status:** Pendente | **Registrado:** 2026-03-06
+## DT-002 — Play Integrity: Migração Classic → Standard + cloudProjectNumber
+**Prioridade:** Alta | **Status:** Implementado, aguardando configuração | **Registrado:** 2026-03-06
 
-**Problema:**
-Play Integrity sendo chamada sem `cloudProjectNumber` — modo "standard" sem binding do app.
+**Problema original:**
+Play Integrity usando a Classic API sem `cloudProjectNumber` — resultado "Indisponível"
+e latência de ~5s por captura.
 
-**Sintoma observado:**
-Log `IntegrityTokenRequest{nonce=..., cloudProjectNumber=null}` em todos os testes.
+**Implementado em 2026-03-11:**
+- `DeviceIntegrityChecker.kt`: `warmUp(cloudProjectNumber: Long)` com guard `<= 0L`
+- `BackendConfig`: campo `cloudProjectNumber` com `PROVVI_DEFAULT_CLOUD_PROJECT = 0L`
+- `ProvviCapture.kt`: warmup assíncrono disparado no `init {}`
+- Com `cloudProjectNumber = 0L`, warmup é ignorado silenciosamente — sem regressão
 
-**Impacto:**
-Em produção, fraudadores podem reutilizar tokens de outros apps.
-Verificação backend comprometida.
 
-**Solução proposta:**
-- Criar projeto no Google Cloud Console
-- Vincular ao app Android via SHA-1
-- Passar `cloudProjectNumber` no `IntegrityTokenRequest`
-- Adicionar como parâmetro de configuração do SDK
+**Pendente (bloqueio externo):**
+Substituir `0L` pelo número real do projeto Google Cloud após:
+1. Abertura de conta Provvi na Play Store (aguardando alteração de razão social)
+2. Publicação do app em internal testing
 
-**Bloqueio:**
-Requer publicação do app na Play Store (mesmo em internal testing).
+Quando configurado: latência ~5000ms → ~150ms, card "❌ Indisponível" → "✅ Verificado"
 
----
+**Decisões de design registradas:**
+- `cloudProjectNumber` default Provvi simplifica onboarding; sobrescrevível por integrador
+- MDM sideload retorna `UNLICENSED` independente do `cloudProjectNumber` — registrar
+  como sinal no manifesto C2PA, não bloquear captura
+- Política de enforcement futura: `BackendConfig.integrityEnforcement: BLOCK | WARN | IGNORE`
 
 ## DT-003 — Certificados C2PA de Desenvolvimento
-**Prioridade:** Alta | **Status:** Em andamento | **Atualizado:** 2026-03-06
+**Prioridade:** Alta | **Status:** Resolvidp | **Resolvido em:** 2026-03-11
 
 **Decisão:**
 Usar certificado ICP-Brasil emitido para o CNPJ da ME
@@ -73,9 +76,8 @@ Aceitável para fase de demonstração: o que importa é kms_signed: true.
 - Alternativa técnica: DigiCert internacional (já na CAI Trust List) se
   necessário resolver signingCredential.trusted antes da Provvi ter CNPJ
 
-**Bloqueio atual:**
-Burocrático — sem impedimento técnico. KMS já está configurado e pronto
-para receber o certificado quando disponível.
+**Resolução:**
+- Certificado e-CNPJ A1 ICP-Brasil emitido pela Certisign para EVERALDO ARISTOTELES DE MORAES (CNPJ 26988458000194). Armazenado no AWS Secrets Manager (provvi/icp-brasil/a1-cert, sa-east-1). Lambda-signer atualizado para assinar com sha256WithRSAEncryption via AC Certisign RFB G5. signing_mode: icp_brasil_a1 ativo. Válido até 2027-03-11.
 
 ---
 
@@ -149,7 +151,7 @@ armazenamento local da sessão quando o upload falha por falta de conectividade.
 Parceria PKI ICP-Brasil (V/Cert ou Serasa) necessária para timestamp com validade jurídica plena.
 
 ---
-
+TODO now
 ## DT-007 — GPS Cold Start (~3s) em Primeira Captura
 **Prioridade:** Baixa | **Status:** Pendente | **Registrado:** 2026-03-06
 
@@ -302,7 +304,7 @@ Site com validador de integridade público — visitante faz upload de imagem
 capturada pelo Provvi e recebe confirmação de autenticidade com cadeia de custódia.
 
 ## DT-013 — Remover Assinatura Local como Padrão (pós cert ICP-Brasil)
-**Prioridade:** Média | **Status:** Pendente | **Registrado:** 2026-03-06
+**Prioridade:** Média | **Status:** Resolvido | **Resolvido em:** 2026-03-11
 
 **Contexto:**
 Hoje o SDK Android assina o manifesto com cert dev Ed25519 sempre — online e offline.
@@ -333,3 +335,6 @@ Quando o certificado ICP-Brasil estiver configurado no KMS, alterar o SDK para:
 **Não fazer antes de:**
 DT-003 resolvido — sem cert ICP-Brasil no KMS, a assinatura local
 com cert dev continua sendo a única com integridade verificável.
+
+**Resolução:**
+- Resolução: Assinatura ICP-Brasil A1 ativa no backend. Assinatura local Ed25519 permanece apenas como fallback offline (signing_mode: kms_dev) — não é mais o caminho padrão.
