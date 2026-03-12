@@ -1647,21 +1647,21 @@ footer {
           <div class="form-row">
             <div class="form-field">
               <label>Nome</label>
-              <input type="text" placeholder="Seu nome completo" required>
+              <input type="text" name="nome" placeholder="Seu nome completo" required>
             </div>
             <div class="form-field">
               <label>Empresa</label>
-              <input type="text" placeholder="Nome da empresa" required>
+              <input type="text" name="empresa" placeholder="Nome da empresa" required>
             </div>
           </div>
           <div class="form-row">
             <div class="form-field">
               <label>Cargo</label>
-              <input type="text" placeholder="Diretor, Gerente...">
+              <input type="text" name="cargo" placeholder="Diretor, Gerente...">
             </div>
             <div class="form-field">
               <label>Segmento</label>
-              <select>
+              <select name="segmento">
                 <option value="" disabled selected>Selecione</option>
                 <option>Seguradora</option>
                 <option>Empresa de Vistoria</option>
@@ -1673,15 +1673,18 @@ footer {
           </div>
           <div class="form-field">
             <label>E-mail corporativo</label>
-            <input type="email" placeholder="voce@empresa.com.br" required>
+            <input type="email" name="email" placeholder="voce@empresa.com.br" required>
           </div>
           <div class="form-field">
             <label>Mensagem</label>
-            <textarea placeholder="Descreva brevemente seu caso de uso ou dúvida"></textarea>
+            <textarea name="mensagem" placeholder="Descreva brevemente seu caso de uso ou dúvida"></textarea>
           </div>
           <button type="submit" class="form-submit">Enviar mensagem →</button>
           <div class="form-success" id="formSuccess">
             ✓ Mensagem recebida. Nossa equipe retornará em até 1 dia útil.
+          </div>
+          <div class="form-success" id="formError" style="background:rgba(220,38,38,0.12);color:#fca5a5;display:none;">
+            ✗ Falha no envio. Tente novamente ou escreva para contato@provvi.com.br
           </div>
         </form>
       </div>
@@ -1922,18 +1925,36 @@ document.getElementById('sessionInput').addEventListener('keydown', (e) => {
 });
 
 // ── Formulário de contato ──────────────────────────────
-function enviarContato(e) {
+async function enviarContato(e) {
   e.preventDefault();
   const form = document.getElementById('contatoForm');
   const success = document.getElementById('formSuccess');
+  const error = document.getElementById('formError');
   const btn = form.querySelector('.form-submit');
+
   btn.textContent = 'Enviando...';
   btn.disabled = true;
-  // Substituir pelo fetch real quando o backend de contato estiver configurado
-  setTimeout(() => {
-    form.style.display = 'none';
-    success.style.display = 'block';
-  }, 800);
+  error.style.display = 'none';
+
+  try {
+    const res = await fetch('https://formspree.io/f/xpqyrpna', {
+      method: 'POST',
+      headers: { 'Accept': 'application/json' },
+      body: new FormData(form),
+    });
+
+    if (res.ok) {
+      form.reset();
+      btn.style.display = 'none';
+      success.style.display = 'block';
+    } else {
+      throw new Error('status ' + res.status);
+    }
+  } catch (err) {
+    error.style.display = 'block';
+    btn.textContent = 'Enviar mensagem →';
+    btn.disabled = false;
+  }
 }
 
 // ── Menu mobile ────────────────────────────────────────
