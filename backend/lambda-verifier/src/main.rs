@@ -134,6 +134,16 @@ fn verify_icp_brasil_signature(
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
+struct HttpContext {
+    method: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RequestContext {
+    http: Option<HttpContext>,
+}
+
+#[derive(Deserialize)]
 struct FunctionUrlEvent {
     body:               Option<String>,
     #[serde(rename = "isBase64Encoded")]
@@ -141,6 +151,8 @@ struct FunctionUrlEvent {
     headers:            Option<std::collections::HashMap<String, String>>,
     #[serde(rename = "queryStringParameters")]
     query_string_parameters: Option<std::collections::HashMap<String, String>>,
+    #[serde(rename = "requestContext")]
+    request_context:    Option<RequestContext>,
     session_id:         Option<String>,
     image_base64:       Option<String>,
 }
@@ -584,14 +596,14 @@ async fn handler(
     icp_cert: Arc<Option<IcpPublicCert>>,
 ) -> Result<serde_json::Value, Error> {
 
-    // Preflight CORS
-    if let Some(ref headers) = event.payload.headers {
-        let method = headers.get(":method")
-            .or_else(|| headers.get("x-http-method"))
-            .map(|s| s.as_str());
-        if method == Some("OPTIONS") {
-            return Ok(cors_response(serde_json::json!({}), 200));
-        }
+    // Preflight CORS — método vem em requestContext.http.method para Lambda Function URL
+    let http_method = event.payload.request_context
+        .as_ref()
+        .and_then(|rc| rc.http.as_ref())
+        .and_then(|h| h.method.as_deref())
+        .unwrap_or("GET");
+    if http_method.eq_ignore_ascii_case("OPTIONS") {
+        return Ok(cors_response(serde_json::json!({}), 200));
     }
 
     let wants_html = want_html(&event.payload.headers);
