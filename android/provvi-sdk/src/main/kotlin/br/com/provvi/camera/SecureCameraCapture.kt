@@ -2,8 +2,11 @@ package br.com.provvi.camera
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraMetadata
+import android.hardware.camera2.CaptureRequest
 import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -91,6 +94,89 @@ class SecureCameraCapture(private val context: Context) {
         }
 
     /**
+     * Aplica configurações determinísticas de captura via Camera2 interop.
+     *
+     * O objetivo é minimizar o processamento de imagem feito pelo OEM/sistema para
+     * garantir que:
+     * - O RecaptureDetector receba sinais espectrais consistentes entre dispositivos
+     * - Padrões de subpixel de telas sejam preservados (não suavizados por HDR/NR)
+     * - A imagem final seja tecnicamente adequada para vistoria de seguros
+     *
+     * O que é controlado:
+     * - HDR_MODE: desativado — evita fusão de frames e tone mapping agressivo
+     * - NOISE_REDUCTION_MODE: MINIMAL — preserva textura real sem destruir subpixels
+     * - EDGE_MODE: OFF — sem sharpening artificial que afeta análise espectral
+     * - ABERRATION_MODE: FAST — correção de aberração cromática básica mantida
+     * - ANTIBANDING_MODE: AUTO — reduz flickering de telas sem afetar análise
+     *
+     * O que NÃO é controlado (deixado para o auto do sistema):
+     * - Exposição e ISO — ajuste automático é necessário para qualidade em campo
+     * - White balance — auto é preferível para fidelidade de cor em vistoria
+     * - Foco — autofoco contínuo é necessário para usabilidade do operador
+     *
+     * Chamado após bindToLifecycle(), quando camera2Control está disponível.
+     *
+     * @param camera2Control Controle Camera2 obtido via interop após o bind.
+     */
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    private fun applyProvviCaptureSettings(camera2Control: Camera2CameraControl) {
+        try {
+            val options = CaptureRequestOptions.Builder()
+
+                // Desativa HDR de captura (fusão de múltiplos frames)
+                // Sem isso, frames são fundidos com tone mapping que destrói micro-padrões UV
+                // CONTROL_SCENE_MODE_HDR não é suportado em todos os dispositivos —
+                // tentativa silenciosa, sem crash se o dispositivo não suportar
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_SCENE_MODE,
+                    CameraMetadata.CONTROL_SCENE_MODE_DISABLED
+                )
+
+                // Noise reduction mínima — preserva textura e variância cromática real
+                // MINIMAL aplica apenas correção de hot pixels, sem suavização de área
+                // OFF poderia introduzir ruído excessivo; MINIMAL é o balanço correto
+                .setCaptureRequestOption(
+                    CaptureRequest.NOISE_REDUCTION_MODE,
+                    CameraMetadata.NOISE_REDUCTION_MODE_MINIMAL
+                )
+
+                // Sem sharpening de borda — edge enhancement artificial
+                // afeta o score_edge do RecaptureDetector e cria artefatos espectrais
+                .setCaptureRequestOption(
+                    CaptureRequest.EDGE_MODE,
+                    CameraMetadata.EDGE_MODE_OFF
+                )
+
+                // Correção de aberração cromática básica mantida (FAST)
+                // Elimina fringing de lente sem afetar padrões de subpixel de tela
+                // OFF criaria artefatos de cor nas bordas que prejudicariam a análise
+                .setCaptureRequestOption(
+                    CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
+                    CameraMetadata.COLOR_CORRECTION_ABERRATION_MODE_FAST
+                )
+
+                // Antibanding automático — reduz flickering de telas fotografadas
+                // sem interferir na análise cromática
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_ANTIBANDING_MODE,
+                    CameraMetadata.CONTROL_AE_ANTIBANDING_MODE_AUTO
+                )
+
+                .build()
+
+            camera2Control.captureRequestOptions = options
+
+            Log.d("CameraCapture", "Provvi capture settings applied: HDR=off, NR=minimal, edge=off")
+
+        } catch (e: Exception) {
+            // Falha silenciosa — dispositivo pode não suportar alguma das opções
+            // A captura continua com as configurações padrão do sistema
+            // Não bloquear a captura por configurações opcionais de otimização
+            Log.w("CameraCapture", "Não foi possível aplicar todas as configurações Provvi: ${e.message}")
+        }
+    }
+
+    /**
      * Inicia a captura exclusiva de frames RAW da câmera traseira.
      *
      * Realiza validações de hardware e permissão antes de abrir a câmera.
@@ -101,6 +187,11 @@ class SecureCameraCapture(private val context: Context) {
      * ou com [CaptureResult.Error] em caso de falha durante a sessão.
      * Após processar um [CaptureResult.Success], o chamador DEVE invocar
      * [ImageProxy.close] para liberar o buffer do frame.
+     *
+     * As configurações de câmera são fixadas via [applyProvviCaptureSettings] para
+     * garantir captura determinística: HDR desativado, noise reduction mínima,
+     * sem edge enhancement. Isso garante consistência espectral entre dispositivos
+     * e preserva os sinais utilizados pelo [RecaptureDetector].
      *
      * @param lifecycleOwner Dono do ciclo de vida — a câmera segue seu estado (STARTED/STOPPED).
      * @param onFrameCaptured Callback invocado com o resultado de cada frame capturado.
@@ -179,10 +270,12 @@ class SecureCameraCapture(private val context: Context) {
                 imageAnalysis
             )
 
-            // Acesso de baixo nível via Camera2 interop para metadados e controle avançado
-            // de hardware (exposição, foco manual, etc.) em versões futuras do SDK
-            @Suppress("UNUSED_VARIABLE")
+            // Obtém o controle Camera2 para aplicar configurações determinísticas de captura
             val camera2Control = Camera2CameraControl.from(camera!!.cameraControl)
+
+            // Aplica configurações Provvi: desativa HDR, NR mínima, sem edge enhancement
+            // Deve ser chamado imediatamente após o bind, antes dos primeiros frames chegarem
+            applyProvviCaptureSettings(camera2Control)
 
             // ID físico da câmera atribuído após o bind — frames só chegam depois deste ponto,
             // portanto o analyzer sempre lê o valor correto via closure
