@@ -51,19 +51,19 @@ data class DiagnosticScores(
 )
 
 // ---------------------------------------------------------------------------
-// Detector (cópia de produção — v1.2/v1.5)
+// Detector (cópia de produção — v1.6)
 // ---------------------------------------------------------------------------
 
 object RecaptureDetector {
 
     private const val FFT_SIZE = 128
 
-    private const val THRESHOLD_MOIRE      = 0.30f
-    private const val THRESHOLD_SPECULAR   = 0.40f
-    private const val THRESHOLD_CHROMATIC  = 0.50f
+    private const val THRESHOLD_MOIRE      = 0.4f
+    private const val THRESHOLD_SPECULAR   = 0.3f
+    private const val THRESHOLD_CHROMATIC  = 0.2f
     private const val THRESHOLD_EDGE       = 0.30f
 
-    private const val THRESHOLD_SUSPICIOUS = 0.35f
+    private const val THRESHOLD_SUSPICIOUS = 0.5f
     const val         THRESHOLD_BLOCK      = 0.65f
 
     private const val MIN_LUMINANCE_MEAN   = 8f
@@ -118,10 +118,10 @@ object RecaptureDetector {
 
         val halfOrigW = width  / 2
         val halfOrigH = height / 2
-        val uPlane    = extractPlaneStrided(imageProxy.planes[1], halfOrigW, halfOrigH, strideOther)
-        val vPlane    = extractPlaneStrided(imageProxy.planes[2], halfOrigW, halfOrigH, strideOther)
-        val halfW     = effectiveW / 2
-        val halfH     = effectiveH / 2
+        val uPlane    = extractPlane(imageProxy.planes[1], halfOrigW, halfOrigH)
+        val vPlane    = extractPlane(imageProxy.planes[2], halfOrigW, halfOrigH)
+        val halfW     = halfOrigW
+        val halfH     = halfOrigH
 
         val yMoire  = if (strideMoire == strideOther) yPlaneOther
                       else extractPlaneStrided(imageProxy.planes[0], width, height, strideMoire)
@@ -129,14 +129,13 @@ object RecaptureDetector {
         val moireH  = height / strideMoire
 
         val scoreMoire     = detectMoire(yMoire, moireW, moireH)
-        val scoreSpecular  = detectSpecularReflection(yPlaneOther, effectiveW, effectiveH)
+        val scoreSpecular  = detectEmissiveSurface(yPlaneOther, effectiveW, effectiveH)
         val scoreChromatic = detectScreenChromaticPattern(uPlane, vPlane, halfW, halfH)
         val scoreEdge      = detectEdgeSharpness(yMoire, moireW, moireH)
 
-        val scoreCombined = (scoreMoire     * 0.25f) +
-                            (scoreSpecular  * 0.25f) +
-                            (scoreChromatic * 0.10f) +
-                            (scoreEdge      * 0.40f)
+        val scoreCombined = (scoreMoire     * 0.40f) +
+                            (scoreSpecular  * 0.35f) +
+                            (scoreChromatic * 0.25f)
 
         val verdict = when {
             scoreCombined > THRESHOLD_BLOCK      -> "BLOCK"
@@ -217,20 +216,44 @@ object RecaptureDetector {
     }
 
     // ---------------------------------------------------------------------------
-    // Análise 2 — Reflexo especular
+    // Análise 2 — Superfície emissiva (substituiu detectSpecularReflection em v1.6)
     // ---------------------------------------------------------------------------
 
-    private fun detectSpecularReflection(yPlane: ByteArray, width: Int, height: Int): Float {
-        val totalPixels = width * height
-        var brightCount = 0
-        for (byte in yPlane) { if ((byte.toInt() and 0xFF) > 240) brightCount++ }
-        val brightRatio = brightCount.toFloat() / totalPixels
-        val minRatio = 0.005f; val maxRatio = 0.15f
-        if (brightRatio < minRatio || brightRatio > maxRatio) return 0f
-        val center = (minRatio + maxRatio) / 2f
-        val range  = (maxRatio - minRatio) / 2f
-        return (1f - abs(brightRatio - center) / range).coerceIn(0f, 1f)
+    private fun detectEmissiveSurface(yPlane: ByteArray, width: Int, height: Int): Float {
+        val meanLum = yPlane.map { it.toInt() and 0xFF }.average().toFloat()
+        if (meanLum < 60f) return 0f
+
+        val windowSize = 8
+        var totalLocalVariance = 0.0
+        var windowCount = 0
+
+        var row = 0
+        while (row + windowSize <= height) {
+            var col = 0
+            while (col + windowSize <= width) {
+                val n = windowSize * windowSize
+                var sum = 0.0; var sumSq = 0.0
+                for (wr in 0 until windowSize) for (wc in 0 until windowSize) {
+                    val idx = (row + wr) * width + (col + wc)
+                    val y = (yPlane[idx].toInt() and 0xFF).toDouble()
+                    sum += y; sumSq += y * y
+                }
+                totalLocalVariance += (sumSq / n) - (sum / n) * (sum / n)
+                windowCount++
+                col += windowSize
+            }
+            row += windowSize
+        }
+
+        if (windowCount == 0) return 0f
+        val meanLocalVariance = totalLocalVariance / windowCount
+        val lumScore = ((meanLum - 60f) / (180f - 60f)).coerceIn(0f, 1f)
+        val varScore = (1f - (meanLocalVariance / 1200.0).coerceIn(0.0, 1.0)).toFloat()
+        return (lumScore * varScore).coerceIn(0f, 1f)
     }
+
+    // DESATIVADO v1.6 — substituído por detectEmissiveSurface. Ver DT-004.
+    // private fun detectSpecularReflection(yPlane: ByteArray, width: Int, height: Int): Float { ... }
 
     // ---------------------------------------------------------------------------
     // Análise 3 — Padrão cromático
@@ -259,7 +282,7 @@ object RecaptureDetector {
             row += windowSize
         }
         if (windowCount == 0) return 0f
-        return ((totalVariance / windowCount - 30.0) / 70.0).toFloat().coerceIn(0f, 1f)
+        return ((totalVariance / windowCount - 5.0) / 35.0).toFloat().coerceIn(0f, 1f)
     }
 
     // ---------------------------------------------------------------------------

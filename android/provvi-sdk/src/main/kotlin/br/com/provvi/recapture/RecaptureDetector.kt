@@ -98,14 +98,15 @@ object RecaptureDetector {
     private const val FFT_SIZE = 128
 
     // Limiares individuais para ativar cada indicador
-    private const val THRESHOLD_MOIRE      = 0.30f
-    private const val THRESHOLD_SPECULAR   = 0.40f
-    private const val THRESHOLD_CHROMATIC  = 0.50f
+    // CALIBRAÇÃO v1.6: Specular e Chromatic mais sensíveis — indicadores corrigidos agora ativos
+    private const val THRESHOLD_MOIRE      = 0.4f
+    private const val THRESHOLD_SPECULAR   = 0.3f   // detectEmissiveSurface — sinal novo, limiar menor
+    private const val THRESHOLD_CHROMATIC  = 0.2f   // UV sem stride — sinal fraco por design
     private const val THRESHOLD_EDGE       = 0.30f
 
-    // Limiar inferior: score acima deste valor → sessão prossegue mas manifesto é flagado
-    // com integrity_risk: MEDIUM. Permite que a seguradora decida com base nas evidências.
-    private const val THRESHOLD_SUSPICIOUS = 0.35f
+    // Limiar combinado reduzido de 0.35 → 0.5 para cobrir os indicadores corrigidos.
+    // CALIBRAÇÃO NECESSÁRIA: ajustar após validar com dataset expandido.
+    private const val THRESHOLD_SUSPICIOUS = 0.5f
 
     // Limiar superior: score acima deste valor → captura bloqueada imediatamente.
     // Reservado para detecções de alta confiança onde o risco é inequívoco.
@@ -170,29 +171,29 @@ object RecaptureDetector {
         val meanLuminance = yPlaneOther.map { it.toInt() and 0xFF }.average().toFloat()
         if (meanLuminance < MIN_LUMINANCE_MEAN) return RecaptureAnalysis.Inconclusive
 
-        // Planos U/V com strideOther para análise cromática
-        // Em YUV_420_888 os planos de crominância já têm metade das dimensões do Y
+        // Planos U/V sem stride adicional — YUV 4:2:0 já tem metade da resolução em cada dimensão.
+        // Aplicar strideOther reduziria para 1/16 da resolução original, eliminando o sinal de
+        // subpixel que detectScreenChromaticPattern precisa (DT-004).
         val halfOrigW = width  / 2
         val halfOrigH = height / 2
-        val uPlane    = extractPlaneStrided(imageProxy.planes[1], halfOrigW, halfOrigH, strideOther)
-        val vPlane    = extractPlaneStrided(imageProxy.planes[2], halfOrigW, halfOrigH, strideOther)
-        val halfW     = effectiveW / 2
-        val halfH     = effectiveH / 2
+        val uPlane    = extractPlane(imageProxy.planes[1], halfOrigW, halfOrigH)
+        val vPlane    = extractPlane(imageProxy.planes[2], halfOrigW, halfOrigH)
+        val halfW     = halfOrigW
+        val halfH     = halfOrigH
 
         // Executa as quatro análises independentes (ver ADR-002, Caminho 1 — v1.1)
         val scoreMoire     = detectMoire(yPlaneMoire, moireW, moireH)
-        val scoreSpecular  = detectSpecularReflection(yPlaneOther, effectiveW, effectiveH)
+        val scoreSpecular  = detectEmissiveSurface(yPlaneOther, effectiveW, effectiveH)
         val scoreChromatic = detectScreenChromaticPattern(uPlane, vPlane, halfW, halfH)
         val scoreEdge      = detectEdgeSharpness(yPlaneMoire, moireW, moireH)
 
-        // Pesos v1.2 — mantidos pois discriminam telas corretamente.
-        // Os falsos positivos em objetos reais foram corrigidos elevando EDGE_SHARP_THRESHOLD
-        // de 42 → 70, não alterando os pesos. Com threshold maior, objetos físicos texturizados
-        // (asfalto, metal, plástico) não mais saturam score_edge.
-        val scoreCombined = (scoreMoire     * 0.25f) +
-                            (scoreSpecular  * 0.25f) +
-                            (scoreChromatic * 0.10f) +
-                            (scoreEdge      * 0.40f)
+        // Pesos v1.6 — redistribuídos para Specular (detectEmissiveSurface) e Chromatic (UV sem stride)
+        // agora que os dois indicadores produzem sinal real. scoreEdge excluído temporariamente
+        // pois apresenta discriminação nula no dataset atual (real=0.47, recaptura=0.48).
+        // CALIBRAÇÃO NECESSÁRIA: reintroduzir scoreEdge após validar com dataset expandido.
+        val scoreCombined = (scoreMoire     * 0.40f) +
+                            (scoreSpecular  * 0.35f) +
+                            (scoreChromatic * 0.25f)
 
         val debugScores = mapOf(
             "moire"          to scoreMoire,
@@ -224,7 +225,7 @@ object RecaptureDetector {
      */
     fun toManifestAssertion(analysis: RecaptureAnalysis): Map<String, Any> = buildMap {
         // Versão do algoritmo — permite rastrear mudanças de limiar em auditorias futuras
-        put("recapture_analysis_version", "1.5")
+        put("recapture_analysis_version", "1.6")
         // Identificador do método — diferencia do pipeline Truepic para fins legais (ADR-002)
         put("recapture_method", "physical_artifact_analysis_no_ml")
 
@@ -386,45 +387,95 @@ object RecaptureDetector {
     }
 
     // ---------------------------------------------------------------------------
-    // Análise 2 — Reflexo especular
+    // Análise 2 — Superfície emissiva (substituiu detectSpecularReflection em v1.6)
     // ---------------------------------------------------------------------------
 
     /**
-     * Detecta o perfil de reflexo especular característico de superfícies planas (telas).
+     * Detecta superfície emissiva (tela) por análise de uniformidade de luminância.
      *
-     * Telas lisas concentram o reflexo em uma área pequena com luminância muito alta (Y > 240).
-     * Objetos físicos com textura difundem a luz de forma mais uniforme — poucos pixels
-     * atingem luminância extrema, ou muitos o fazem (overexposure legítimo).
+     * Telas digitais emitem luz própria e produzem luminância média elevada com variância
+     * local baixa — iluminação uniforme sem gradientes naturais de luz ambiente.
+     * Objetos físicos iluminados por luz natural têm gradientes pronunciados e variância
+     * local alta mesmo com luminância média similar.
      *
-     * A janela suspeita é 0.5%–8% de pixels com Y > 240:
-     * - Abaixo de 0.5%: reflexo insuficiente — objeto físico ou tela muito inclinada.
-     * - Acima de 8%: overexposure geral — não indicativo de tela especificamente.
-     * - Entre 0.5% e 8%: perfil compatível com reflexo especular de tela.
+     * Sinal: combinação de luminância média elevada (> 60) + baixa variância local.
+     * Score alto quando meanLuminance > 60 AND variância local média < 1200.
+     *
+     * CALIBRAÇÃO NECESSÁRIA: limiares definidos com base no dataset atual (482 imagens).
+     * Validar com dataset expandido — especialmente telas OLED escuras (meanLum baixo).
      *
      * @param yPlane Plano Y extraído com strideOther.
      * @param width  Largura efetiva do plano.
      * @param height Altura efetiva do plano.
-     * @return Score 0.0–1.0 (1.0 = perfil de reflexo de tela máximo).
+     * @return Score 0.0–1.0 (1.0 = superfície emissiva com alta confiança).
      */
-    private fun detectSpecularReflection(yPlane: ByteArray, width: Int, height: Int): Float {
-        val totalPixels = width * height
+    private fun detectEmissiveSurface(yPlane: ByteArray, width: Int, height: Int): Float {
+        val meanLum = yPlane.map { it.toInt() and 0xFF }.average().toFloat()
 
-        var brightCount = 0
-        for (byte in yPlane) {
-            if ((byte.toInt() and 0xFF) > 240) brightCount++
+        // Luminância muito baixa: sem luz suficiente para distinguir tela de objeto
+        if (meanLum < 60f) return 0f
+
+        val windowSize = 8
+        var totalLocalVariance = 0.0
+        var windowCount = 0
+
+        var row = 0
+        while (row + windowSize <= height) {
+            var col = 0
+            while (col + windowSize <= width) {
+                val n = windowSize * windowSize
+                var sum = 0.0
+                var sumSq = 0.0
+
+                for (wr in 0 until windowSize) {
+                    for (wc in 0 until windowSize) {
+                        val idx = (row + wr) * width + (col + wc)
+                        val y = (yPlane[idx].toInt() and 0xFF).toDouble()
+                        sum += y
+                        sumSq += y * y
+                    }
+                }
+                val variance = (sumSq / n) - (sum / n) * (sum / n)
+                totalLocalVariance += variance
+                windowCount++
+                col += windowSize
+            }
+            row += windowSize
         }
 
-        val brightRatio = brightCount.toFloat() / totalPixels
-        val minRatio    = 0.005f
-        val maxRatio    = 0.15f   // ampliado de 8% para 15% — telas brilhantes saturam mais pixels
+        if (windowCount == 0) return 0f
 
-        if (brightRatio < minRatio || brightRatio > maxRatio) return 0f
+        val meanLocalVariance = totalLocalVariance / windowCount
 
-        val center = (minRatio + maxRatio) / 2f
-        val range  = (maxRatio - minRatio) / 2f
-        val dist   = abs(brightRatio - center) / range
-        return (1f - dist).coerceIn(0f, 1f)
+        // Telas emissivas: meanLum alto + variância local baixa
+        // Objetos físicos: variância local alta independente da luminância
+        val lumScore = ((meanLum - 60f) / (180f - 60f)).coerceIn(0f, 1f)
+        val varScore = (1f - (meanLocalVariance / 1200.0).coerceIn(0.0, 1.0)).toFloat()
+
+        // Produto: penaliza quando um dos sinais é fraco — ambos precisam estar presentes
+        return (lumScore * varScore).coerceIn(0f, 1f)
     }
+
+    // DESATIVADO v1.6 — substituído por detectEmissiveSurface. Ver DT-004.
+    // O indicador original buscava reflexo especular concentrado (0.5–8% de pixels > 240).
+    // Problema: imagens recapturadas de telas emissivas não produzem reflexo especular —
+    // a tela é fonte de luz, não superfície reflexiva. Score era zero em todas as 482 amostras.
+    //
+    // private fun detectSpecularReflection(yPlane: ByteArray, width: Int, height: Int): Float {
+    //     val totalPixels = width * height
+    //     var brightCount = 0
+    //     for (byte in yPlane) {
+    //         if ((byte.toInt() and 0xFF) > 240) brightCount++
+    //     }
+    //     val brightRatio = brightCount.toFloat() / totalPixels
+    //     val minRatio    = 0.005f
+    //     val maxRatio    = 0.15f
+    //     if (brightRatio < minRatio || brightRatio > maxRatio) return 0f
+    //     val center = (minRatio + maxRatio) / 2f
+    //     val range  = (maxRatio - minRatio) / 2f
+    //     val dist   = abs(brightRatio - center) / range
+    //     return (1f - dist).coerceIn(0f, 1f)
+    // }
 
     // ---------------------------------------------------------------------------
     // Análise 3 — Padrão cromático de tela
@@ -487,8 +538,10 @@ object RecaptureDetector {
         if (windowCount == 0) return 0f
 
         val meanVariance = totalVariance / windowCount
-        val threshold    = 30.0
-        val maxVariance  = 100.0
+        // Limiares recalibrados para UV sem stride adicional (DT-004).
+        // CALIBRAÇÃO NECESSÁRIA: validar com dataset expandido após aplicar a correção.
+        val threshold    = 5.0    // variância mínima esperada em objetos físicos
+        val maxVariance  = 40.0   // variância esperada em telas de alta resolução
 
         return ((meanVariance - threshold) / (maxVariance - threshold))
             .toFloat()
