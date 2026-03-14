@@ -456,14 +456,18 @@ class ProvviCapture(
             else -> "NONE"
         }
 
-        // Risco de integridade do dispositivo (Play Integrity) — DT-014
+        // Risco de integridade do dispositivo (Play Integrity / Key Attestation) — DT-014
         // Avalia apenas quando a API retornou veredicto — se Unavailable, não penaliza (DT-002)
         val deviceRisk: String = when {
-            deviceVerdict == null                -> "NONE"   // API indisponível — sem penalidade
-            !deviceVerdict.meetsDeviceIntegrity  -> "HIGH"   // sem certificação de hardware → alto risco
-            !deviceVerdict.meetsBasicIntegrity   -> "HIGH"   // nunca alcançado (bloqueado em IntegrityResult.Verified)
-            !deviceVerdict.meetsStrongIntegrity  -> "MEDIUM" // certificado mas sem strongbox
-            else                                 -> "NONE"
+            deviceVerdict == null               -> "NONE"   // API indisponível — sem penalidade
+            !deviceVerdict.meetsDeviceIntegrity -> "HIGH"   // sem certificação de hardware → alto risco
+            !deviceVerdict.meetsBasicIntegrity  -> "HIGH"   // nunca alcançado (bloqueado em IntegrityResult.Verified)
+            // Key Attestation com TEE: backend validou bootloader_locked=true e verified_boot=verified
+            // antes de assinar — dispositivo considerado seguro independente do StrongBox
+            !deviceVerdict.meetsStrongIntegrity
+                && deviceVerdict.attestationType == "key_attestation" -> "NONE"
+            !deviceVerdict.meetsStrongIntegrity -> "MEDIUM" // Play Integrity sem StrongBox
+            else                                -> "NONE"
         }
 
         // Risco consolidado: o mais severo entre os dois eixos
