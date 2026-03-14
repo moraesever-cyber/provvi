@@ -275,10 +275,7 @@ fn cors_response(body: serde_json::Value, status: u16) -> serde_json::Value {
     serde_json::json!({
         "statusCode": status,
         "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type"
+            "Content-Type": "application/json"
         },
         "body": body.to_string()
     })
@@ -288,8 +285,7 @@ fn html_response(html: String, status: u16) -> serde_json::Value {
     serde_json::json!({
         "statusCode": status,
         "headers": {
-            "Content-Type": "text/html; charset=utf-8",
-            "Access-Control-Allow-Origin": "*"
+            "Content-Type": "text/html; charset=utf-8"
         },
         "body": html
     })
