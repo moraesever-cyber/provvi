@@ -1897,13 +1897,24 @@ async function verificar() {
 
     if (res.ok) {
       const data = await res.json();
+      if (!data.valid) {
+        result.className = 'verif-result error';
+        result.textContent = '✗ Session ID não encontrado ou imagem não autenticada pelo Provvi.';
+        return;
+      }
+      const assinatura = data.icp_signature_valid
+        ? 'Válida · ICP-Brasil'
+        : (data.kms_signed ? 'Válida · Provvi KMS' : '—');
+      const atestacao = data.attestation_type === 'key_attestation'
+        ? 'Key Attestation (Google Root CA)'
+        : (data.attestation_type === 'play_integrity' ? 'Play Integrity' : '—');
       result.className = 'verif-result success';
       result.innerHTML = `✓ IMAGEM AUTENTICADA<br><br>` +
         `Session ID: ${data.session_id || sessionId}<br>` +
-        `Capturado em: ${data.captured_at || '—'}<br>` +
-        `Dispositivo: ${data.device_id || '—'}<br>` +
-        `Assinatura: ${data.signature_valid ? 'Válida · ICP-Brasil' : '—'}<br>` +
-        `Hash SHA-256: ${(data.sha256 || '').substring(0, 32)}...`;
+        `Capturado em: ${data.captured_at_iso || '—'}<br>` +
+        `Dispositivo: ${atestacao}<br>` +
+        `Assinatura: ${assinatura}<br>` +
+        `Hash SHA-256: ${(data.frame_hash_hex || '').substring(0, 32)}...`;
     } else {
       result.className = 'verif-result error';
       result.textContent = '✗ Session ID não encontrado ou imagem não autenticada pelo Provvi.';
