@@ -120,6 +120,8 @@ class MainActivity : FlutterActivity() {
                         "Possível recaptura detectada (score: ${"%.2f".format(outcome.score)}, indicadores: ${outcome.indicators.joinToString()})",
                         null
                     )
+                is br.com.provvi.CaptureOutcome.BackendError ->
+                    result.error("BACKEND_ERROR", outcome.message, null)
             }
         }
     }

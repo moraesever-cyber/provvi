@@ -235,7 +235,7 @@ class _MetadataGrid extends StatelessWidget {
         crossAxisCount: 2,
         crossAxisSpacing: 8,
         mainAxisSpacing: 8,
-        childAspectRatio: 2.2,
+        childAspectRatio: 1.8,
       ),
       itemCount: items.length,
       itemBuilder: (_, i) {

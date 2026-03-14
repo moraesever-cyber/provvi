@@ -60,7 +60,9 @@ enum class BackendErrorType {
     /** Backend retornou 503 com body `"error": "TSA_UNAVAILABLE"` — âncora temporal indisponível. */
     TSA_UNAVAILABLE,
     /** Backend retornou 401 — API Key inválida ou expirada (DT-005/008). */
-    AUTH_FAILED
+    AUTH_FAILED,
+    /** Backend retornou 403 — Key Attestation detectou bootloader unlocked ou verified boot falhou. */
+    DEVICE_COMPROMISED
 }
 
 /**
@@ -159,6 +161,14 @@ class ProvviBackendClient(private val config: BackendConfig) {
                         errorType   = BackendErrorType.AUTH_FAILED
                     )
                 }
+                403 -> {
+                    Log.w(TAG, "Erro 403 ao enviar sessão ${session.sessionId}: dispositivo comprometido (Key Attestation)")
+                    BackendResult.Error(
+                        message     = "Dispositivo comprometido detectado — bootloader desbloqueado ou verified boot falhou",
+                        isRetryable = false,
+                        errorType   = BackendErrorType.DEVICE_COMPROMISED
+                    )
+                }
                 in 400..499 -> {
                     // Erro de cliente — payload inválido, sem retry
                     Log.w(TAG, "Erro HTTP $responseCode ao enviar sessão ${session.sessionId}: $responseBody")
@@ -248,6 +258,13 @@ class ProvviBackendClient(private val config: BackendConfig) {
             put("frame_hash_hex",    session.frameHashHex)
             put("captured_at_ms",    session.capturedAtMs)
             put("assertions",        assertionsJson)
+            // Key Attestation — incluído apenas quando disponível (fallback sem cloudProjectNumber)
+            if (session.attestationChain != null) {
+                val chainArray = org.json.JSONArray()
+                session.attestationChain.forEach { chainArray.put(it) }
+                put("attestation_chain", chainArray)
+                put("attestation_type",  session.attestationType)
+            }
         }.toString()
     }
 

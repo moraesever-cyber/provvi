@@ -110,7 +110,11 @@ data class CaptureSession(
     val manifestUrl: String? = null,
     /** Tempo gasto em cada camada do pipeline, em milissegundos (DT-001). */
     val pipelineTimingsMs: Map<String, Long>? = null,
-    val integrityRisk: String = "NONE"
+    val integrityRisk: String = "NONE",
+    /** Cadeia de certificados DER em Base64 para Key Attestation (null quando via Play Integrity). */
+    val attestationChain: List<String>? = null,
+    /** "play_integrity" | "key_attestation" — indica qual mecanismo gerou o veredicto. */
+    val attestationType: String = "play_integrity"
 ) {
     // Gerado — necessário para data class com ByteArray
     override fun equals(other: Any?): Boolean {
@@ -126,7 +130,9 @@ data class CaptureSession(
                clockSuspicious == other.clockSuspicious &&
                manifestUrl == other.manifestUrl &&
                pipelineTimingsMs == other.pipelineTimingsMs &&
-               integrityRisk == other.integrityRisk
+               integrityRisk == other.integrityRisk &&
+               attestationChain == other.attestationChain &&
+               attestationType == other.attestationType
     }
 
     override fun hashCode(): Int {
@@ -141,6 +147,8 @@ data class CaptureSession(
         result = 31 * result + manifestUrl.hashCode()
         result = 31 * result + pipelineTimingsMs.hashCode()
         result = 31 * result + integrityRisk.hashCode()
+        result = 31 * result + attestationChain.hashCode()
+        result = 31 * result + attestationType.hashCode()
         return result
     }
 }
@@ -332,18 +340,24 @@ class ProvviCapture(
         // -----------------------------------------------------------------
         var deviceVerdict: DeviceVerdict? = null
         var integrityToken = ""
+        var attestationChain: List<String>? = null
+        var attestationType = "play_integrity"
 
         when (integrityResult) {
             is IntegrityResult.Verified -> {
                 // meetsBasicIntegrity = false indica root, emulador modificado ou
-                // manipulação de software — captura bloqueada conforme ADR-001
+                // manipulação de software — captura bloqueada conforme ADR-001.
+                // Para Key Attestation, este valor é local/otimista; o enforcement
+                // real acontece no backend via verificação da cadeia de certificados.
                 if (!integrityResult.verdict.meetsBasicIntegrity) {
                     cameraCapture.stopCapture()
                     frameChannel.close()
                     return CaptureOutcome.DeviceCompromised
                 }
-                deviceVerdict  = integrityResult.verdict
-                integrityToken = integrityResult.verdict.tokenBase64
+                deviceVerdict    = integrityResult.verdict
+                integrityToken   = integrityResult.verdict.tokenBase64
+                attestationChain = integrityResult.verdict.attestationChain
+                attestationType  = integrityResult.verdict.attestationType
             }
             is IntegrityResult.Failed,
             IntegrityResult.Unavailable -> {
@@ -564,7 +578,9 @@ class ProvviCapture(
             capturedAtMs         = successFrame.capturedAtMs,
             clockSuspicious      = clockSuspicious,
             manifestUrl          = null,
-            integrityRisk        = integrityRisk
+            integrityRisk        = integrityRisk,
+            attestationChain     = attestationChain,
+            attestationType      = attestationType
         )
 
         // -----------------------------------------------------------------
@@ -584,13 +600,15 @@ class ProvviCapture(
                 }
                 is BackendResult.Error -> {
                     // TSA indisponível → propaga como CaptureOutcome.BackendError (DT-017)
-                    // O pipeline já completou (câmera, hash, assinatura), mas a âncora temporal
-                    // não foi obtida — a sessão não é persistida no S3/DynamoDB.
                     if (uploadResult.errorType == BackendErrorType.TSA_UNAVAILABLE) {
                         return CaptureOutcome.BackendError(
                             errorType = BackendErrorType.TSA_UNAVAILABLE,
                             message   = uploadResult.message
                         )
+                    }
+                    // Dispositivo comprometido detectado via Key Attestation no backend
+                    if (uploadResult.errorType == BackendErrorType.DEVICE_COMPROMISED) {
+                        return CaptureOutcome.DeviceCompromised
                     }
                     // Outros erros de upload — sessão local permanece válida sem a URL
                     android.util.Log.w(
@@ -709,9 +727,10 @@ class ProvviCapture(
             is CaptureOutcome.BackendError -> {
                 // DT-017: mapeia erros de backend classificados para ProvviErrorType
                 val type = when (outcome.errorType) {
-                    BackendErrorType.TSA_UNAVAILABLE -> ProvviErrorType.TSA_UNAVAILABLE
-                    BackendErrorType.AUTH_FAILED     -> ProvviErrorType.BACKEND_AUTH_FAILED
-                    BackendErrorType.GENERIC         -> ProvviErrorType.BACKEND_UNAVAILABLE
+                    BackendErrorType.TSA_UNAVAILABLE   -> ProvviErrorType.TSA_UNAVAILABLE
+                    BackendErrorType.AUTH_FAILED       -> ProvviErrorType.BACKEND_AUTH_FAILED
+                    BackendErrorType.DEVICE_COMPROMISED -> ProvviErrorType.DEVICE_COMPROMISED
+                    BackendErrorType.GENERIC           -> ProvviErrorType.BACKEND_UNAVAILABLE
                 }
                 ProvviResult.Failure(ProvviError(type, outcome.message))
             }

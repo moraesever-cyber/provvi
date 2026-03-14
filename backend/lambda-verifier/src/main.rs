@@ -175,6 +175,14 @@ struct VerifyResponse {
     icp_signature_valid: Option<bool>,
     /// "granted" | "skipped" | "" — resultado da âncora temporal RFC 3161 (DT-016)
     tsa_status:          String,
+    /// "play_integrity" | "key_attestation" | "" — mecanismo de integridade usado pelo SDK
+    attestation_type:           String,
+    /// "tee" | "strongbox" | "" — nível de segurança do hardware (Key Attestation)
+    attestation_security_level: String,
+    /// true se bootloader está bloqueado (Key Attestation)
+    attestation_bootloader:     bool,
+    /// "verified" | "self_signed" | "unverified" | "failed" | "" (Key Attestation)
+    attestation_verified_boot:  String,
 }
 
 #[derive(Serialize)]
@@ -226,6 +234,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .hash-box{background:#0D1B2A;border-radius:10px;padding:14px 16px}
 .hash-label{font-size:9px;font-weight:700;letter-spacing:1.5px;color:#60A5FA;text-transform:uppercase;margin-bottom:8px}
 .hash-value{font-family:'Courier New',monospace;font-size:12px;color:white;line-height:1.75;word-break:break-all}
+.attestation-detail{margin:2px 0 6px 32px;background:#F0FDF4;border-radius:8px;padding:8px 12px;border-left:2px solid #16A34A}
+.att-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:3px 0;color:#374151}
+.att-row:not(:last-child){border-bottom:1px solid #DCFCE7}
+.att-val{font-weight:600;color:#166534}
 .print-btn{display:block;width:calc(100% - 40px);margin:16px 20px 4px;padding:13px;background:#1D4ED8;color:white;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
 .print-btn:active{background:#1E40AF}
 .footer{padding:12px 20px 20px;text-align:center}
@@ -350,8 +362,12 @@ fn render_certificate_html(
     icp_valid_until:     &str,
     signing_mode:        &str,
     icp_signature_valid: Option<bool>,
-    pdf_lambda_url:      &str,
-    tsa_status:          &str,   // "granted" | "skipped" | "" — DT-016
+    pdf_lambda_url:             &str,
+    tsa_status:                 &str,   // "granted" | "skipped" | "" — DT-016
+    attestation_type:           &str,   // "play_integrity" | "key_attestation" | "" — DT-002
+    attestation_security_level: &str,   // "tee" | "strongbox" | ""
+    attestation_bootloader:     bool,
+    attestation_verified_boot:  &str,   // "verified" | "self_signed" | "unverified" | "failed" | ""
 ) -> String {
     let captured_by = if !captured_by_stored.is_empty() {
         captured_by_stored
@@ -393,6 +409,37 @@ fn render_certificate_html(
         "granted" => ("✅", "Âncora temporal RFC 3161"),
         "skipped" => ("ℹ️", "Âncora temporal — não configurada"),
         _         => ("⚠️", "Âncora temporal ausente"),
+    };
+
+    let (att_icon, att_label) = match attestation_type {
+        "key_attestation"  => ("✅", "Key Attestation (hardware)"),
+        "play_integrity"   => ("✅", "Play Integrity API"),
+        _                  => ("ℹ️", "Integridade de dispositivo — não disponível"),
+    };
+
+    // Bloco de detalhe expandido — exibido apenas para Key Attestation (gancho de demo)
+    let att_detail_html = if attestation_type == "key_attestation" {
+        let sec_label = match attestation_security_level {
+            "strongbox" => "StrongBox (chip dedicado)",
+            "tee"       => "TEE (enclave de hardware)",
+            s if !s.is_empty() => s,
+            _           => "Não informado",
+        };
+        let boot_label = if attestation_bootloader { "Bloqueado ✅" } else { "Desbloqueado ⚠️" };
+        let vboot_label = match attestation_verified_boot {
+            "verified"    => "Verified ✅",
+            "self_signed" => "Self-signed ⚠️",
+            "unverified"  => "Não verificado ⚠️",
+            "failed"      => "Falhou 🚨",
+            s if !s.is_empty() => s,
+            _             => "Não informado",
+        };
+        format!(
+            r#"<div class="attestation-detail"><div class="att-row"><span>🔒 Bootloader</span><span class="att-val">{boot}</span></div><div class="att-row"><span>🔄 Verified Boot</span><span class="att-val">{vboot}</span></div><div class="att-row"><span>🔐 Nível de segurança</span><span class="att-val">{sec}</span></div><div class="att-row"><span>🏛️ Raiz certificada</span><span class="att-val">Google Root CA ✓</span></div></div>"#,
+            boot = boot_label, vboot = vboot_label, sec = sec_label,
+        )
+    } else {
+        String::new()
     };
 
     // Ícone de assinatura do servidor reflete ICP-Brasil quando disponível
@@ -468,10 +515,12 @@ fn render_certificate_html(
     ));
 
     body.push_str(&format!(
-        r#"<div class="section"><div class="section-title">Verificações de Integridade</div><div class="check-list"><div class="check-item"><span class="check-icon">{ci}</span><span>Relógio do dispositivo — <strong>{cl}</strong></span></div><div class="check-item"><span class="check-icon">{li}</span><span>Localização GPS — <strong>{ll}</strong></span></div><div class="check-item"><span class="check-icon">{ri}</span><span>Detecção de recaptura — <strong>{rl}</strong></span></div><div class="check-item"><span class="check-icon">{ki}</span><span>Assinatura do servidor — <strong>{kl}</strong></span></div><div class="check-item"><span class="check-icon">{ti}</span><span>Carimbo de tempo — <strong>{tl}</strong></span></div><div class="check-item"><span class="check-icon">🛡️</span><span>Risco geral — <span class="risk-badge {rbc}">{rbl}</span></span></div></div></div>"#,
+        r#"<div class="section"><div class="section-title">Verificações de Integridade</div><div class="check-list"><div class="check-item"><span class="check-icon">{ci}</span><span>Relógio do dispositivo — <strong>{cl}</strong></span></div><div class="check-item"><span class="check-icon">{li}</span><span>Localização GPS — <strong>{ll}</strong></span></div><div class="check-item"><span class="check-icon">{ri}</span><span>Detecção de recaptura — <strong>{rl}</strong></span></div><div class="check-item"><span class="check-icon">{ai}</span><span>Integridade do dispositivo — <strong>{al}</strong></span></div>{attd}<div class="check-item"><span class="check-icon">{ki}</span><span>Assinatura do servidor — <strong>{kl}</strong></span></div><div class="check-item"><span class="check-icon">{ti}</span><span>Carimbo de tempo — <strong>{tl}</strong></span></div><div class="check-item"><span class="check-icon">🛡️</span><span>Risco geral — <span class="risk-badge {rbc}">{rbl}</span></span></div></div></div>"#,
         ci = clock_icon,     cl = clock_label,
         li = loc_icon,       ll = loc_label,
         ri = rec_icon,       rl = rec_label,
+        ai = att_icon,       al = att_label,
+        attd = att_detail_html,
         ki = sig_check_icon, kl = sig_check_label,
         ti = tsa_icon,       tl = tsa_label,
         rbc = risk_class,    rbl = risk_label,
@@ -633,8 +682,12 @@ async fn handler(
             icp_cnpj:            String::new(),
             icp_valid_until:     String::new(),
             signing_mode:        String::new(),
-            icp_signature_valid: None,
-            tsa_status:          String::new(),
+            icp_signature_valid:        None,
+            tsa_status:                 String::new(),
+            attestation_type:           String::new(),
+            attestation_security_level: String::new(),
+            attestation_bootloader:     false,
+            attestation_verified_boot:  String::new(),
         })?, 200));
     };
 
@@ -659,7 +712,11 @@ async fn handler(
     let signing_mode    = get_str(&item, "signing_mode");
     let icp_signature   = get_str(&item, "icp_signature");
     let manifest_s3_key = get_str(&item, "manifest_s3_key");
-    let tsa_status      = get_str(&item, "tsa_status");
+    let tsa_status                 = get_str(&item, "tsa_status");
+    let attestation_type           = get_str(&item, "attestation_type");
+    let attestation_security_level = get_str(&item, "attestation_security_level");
+    let attestation_bootloader     = get_bool(&item, "attestation_bootloader");
+    let attestation_verified_boot  = get_str(&item, "attestation_verified_boot");
 
     // Verifica hash da imagem se fornecida
     let frame_hash_match = image_hash.map(|h| h == frame_hash_hex);
@@ -790,6 +847,10 @@ async fn handler(
             &signing_mode, icp_signature_valid,
             &pdf_lambda_url,
             &tsa_status,
+            &attestation_type,
+            &attestation_security_level,
+            attestation_bootloader,
+            &attestation_verified_boot,
         );
         return Ok(html_response(html, 200));
     }
@@ -813,6 +874,10 @@ async fn handler(
         signing_mode,
         icp_signature_valid,
         tsa_status,
+        attestation_type,
+        attestation_security_level,
+        attestation_bootloader,
+        attestation_verified_boot,
     })?, 200))
 }
 

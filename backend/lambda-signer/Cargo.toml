@@ -31,3 +31,5 @@ rsa = "0.9"
 # TSA RFC 3161 — cliente HTTP e geração de nonce aleatório
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 rand = "0.8"
+# Key Attestation — parse e verificação de cadeia de certificados X.509
+x509-parser = { version = "0.16", features = ["verify"] }

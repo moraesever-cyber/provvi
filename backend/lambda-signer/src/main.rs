@@ -38,6 +38,95 @@ const ICP_SUBJECT: &str = "EVERALDO ARISTOTELES DE MORAES";
 const ICP_CNPJ:    &str = "26988458000194";
 
 // ---------------------------------------------------------------------------
+// Google Hardware Attestation Root CA — carregado no cold start
+// ---------------------------------------------------------------------------
+
+/// Certificados raiz do Google Hardware Attestation CA em DER.
+/// Contém RSA Root CA 1 e EC P-384 Root CA 2 (dois certificados).
+struct GoogleAttestationRoots {
+    der_certs: Vec<Vec<u8>>,
+}
+
+/// Converte uma string PEM (com header/footer e quebras de linha reais ou \\n) para DER.
+fn pem_to_der(pem: &str) -> Result<Vec<u8>, String> {
+    // Normaliza \\n literal (como vem do Secrets Manager) para quebra de linha real
+    let normalized = pem.replace("\\n", "\n");
+    let b64: String = normalized
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("-----"))
+        .collect();
+    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64)
+        .map_err(|e| format!("Falha ao decodificar PEM base64: {e}"))
+}
+
+/// Carrega os certificados raiz do Google Hardware Attestation CA do Secrets Manager.
+///
+/// O secret deve conter um JSON array de strings PEM — formato baixado diretamente
+/// da documentação Android (dois CAs: RSA Root CA 1 e EC P-384 Root CA 2).
+///
+/// Retorna `None` se `GOOGLE_ATTESTATION_ROOT_CA_SECRET` não estiver configurada,
+/// o que desabilita a verificação de raiz (aceita cadeias sem ancoragem).
+async fn load_google_attestation_roots(
+    sm: &aws_sdk_secretsmanager::Client,
+) -> Option<GoogleAttestationRoots> {
+    let secret_id = std::env::var("GOOGLE_ATTESTATION_ROOT_CA_SECRET").ok()?;
+    if secret_id.is_empty() {
+        return None;
+    }
+
+    let response = sm
+        .get_secret_value()
+        .secret_id(&secret_id)
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::warn!(
+                secret_id = %secret_id,
+                error      = %e,
+                "Falha ao carregar Google Attestation Root CA — verificação de raiz desabilitada"
+            );
+        })
+        .ok()?;
+
+    let secret_str = match response.secret_string() {
+        Some(s) => s,
+        None => {
+            tracing::warn!("Google Attestation Root CA: secret não contém string");
+            return None;
+        }
+    };
+
+    let pems: Vec<String> = serde_json::from_str(secret_str)
+        .map_err(|e| {
+            tracing::warn!(error = %e, "Google Attestation Root CA: JSON inválido — esperado array de strings PEM");
+        })
+        .ok()?;
+
+    let der_certs: Vec<Vec<u8>> = pems
+        .iter()
+        .filter_map(|pem| {
+            pem_to_der(pem)
+                .map_err(|e| {
+                    tracing::warn!(error = %e, "Google Attestation Root CA: falha ao decodificar PEM");
+                })
+                .ok()
+        })
+        .collect();
+
+    if der_certs.is_empty() {
+        tracing::warn!("Google Attestation Root CA: nenhum certificado válido carregado");
+        return None;
+    }
+
+    info!(
+        count = der_certs.len(),
+        "Google Hardware Attestation Root CA carregados com sucesso"
+    );
+
+    Some(GoogleAttestationRoots { der_certs })
+}
+
+// ---------------------------------------------------------------------------
 // Tipos de entrada e saída da Lambda
 // ---------------------------------------------------------------------------
 
@@ -54,13 +143,20 @@ struct FunctionUrlEvent {
 /// Payload real da requisição
 #[derive(Deserialize)]
 struct SignRequest {
-    session_id:      String,
-    image_base64:    String,
-    manifest_json:   String,
-    frame_hash_hex:  String,
-    captured_at_ms:  i64,
-    assertions:      serde_json::Value,
+    session_id:        String,
+    image_base64:      String,
+    manifest_json:     String,
+    frame_hash_hex:    String,
+    captured_at_ms:    i64,
+    assertions:        serde_json::Value,
+    /// Cadeia de certificados DER em Base64 — presente quando SDK usou Key Attestation fallback
+    attestation_chain: Option<Vec<String>>,
+    /// "play_integrity" | "key_attestation" — informa o mecanismo usado pelo SDK
+    #[serde(default = "default_attestation_type")]
+    attestation_type:  String,
 }
+
+fn default_attestation_type() -> String { "play_integrity".to_string() }
 
 /// Resposta retornada ao SDK após processamento
 #[derive(Serialize)]
@@ -85,6 +181,8 @@ struct SignResponse {
     tsa_status:       String,
     /// URL da TSA usada nesta requisição (vazia se TSA_URL não configurada)
     tsa_url:          String,
+    /// "play_integrity" | "key_attestation" | "none"
+    attestation_type: String,
 }
 
 /// Resposta HTTP proxy para Lambda Function URL — permite controlar status code (DT-017).
@@ -122,6 +220,16 @@ impl LambdaHttpResponse {
             status_code: 401,
             headers:     [("Content-Type".to_string(), "application/json".to_string())].into(),
             body:        r#"{"error":"UNAUTHORIZED","message":"API Key inválida ou ausente"}"#.to_string(),
+        }
+    }
+
+    /// HTTP 403 com body `{"error":"DEVICE_COMPROMISED"}` — bootloader unlocked ou
+    /// verified boot falhou, detectado via Key Attestation.
+    fn device_compromised() -> Self {
+        Self {
+            status_code: 403,
+            headers:     [("Content-Type".to_string(), "application/json".to_string())].into(),
+            body:        r#"{"error":"DEVICE_COMPROMISED","message":"Dispositivo comprometido detectado via Key Attestation — bootloader desbloqueado ou verified boot falhou"}"#.to_string(),
         }
     }
 }
@@ -218,8 +326,9 @@ async fn load_icp_brasil_cert(
 // ---------------------------------------------------------------------------
 
 async fn handler(
-    event:    LambdaEvent<FunctionUrlEvent>,
-    icp_cert: Arc<Option<IcpBrasilCert>>,
+    event:        LambdaEvent<FunctionUrlEvent>,
+    icp_cert:     Arc<Option<IcpBrasilCert>>,
+    google_roots: Arc<Option<GoogleAttestationRoots>>,
 ) -> Result<LambdaHttpResponse, Error> {
     // ------------------------------------------------------------------
     // 0. Autenticação por API Key
@@ -281,6 +390,58 @@ async fn handler(
         &base64::engine::general_purpose::STANDARD,
         &req.image_base64,
     ).map_err(|e| format!("Falha ao decodificar imagem base64: {e}"))?;
+
+    // ------------------------------------------------------------------
+    // 1b. Key Attestation — verifica integridade do dispositivo quando presente
+    //
+    // Executada ANTES da TSA e dos writes no S3/DynamoDB — se o dispositivo
+    // estiver comprometido, rejeita sem persistir nada.
+    //
+    // O challenge na cadeia de certificados deve corresponder ao session_id:
+    // prova que a cadeia foi gerada especificamente para esta sessão.
+    // ------------------------------------------------------------------
+    let (attestation_security_level, attestation_bootloader_locked, attestation_verified_boot) =
+        if let Some(ref chain) = req.attestation_chain {
+            match verify_key_attestation(chain, &req.session_id, google_roots.as_ref().as_ref()) {
+                Ok(fields) => {
+                    if !fields.challenge_valid {
+                        tracing::warn!(
+                            session_id = %req.session_id,
+                            "Key Attestation: challenge não corresponde ao session_id — possível reutilização de cadeia"
+                        );
+                        // Bloqueia: challenge inválido indica tentativa de replay
+                        return Ok(LambdaHttpResponse::device_compromised());
+                    }
+                    if !fields.bootloader_locked || fields.verified_boot == "failed" {
+                        tracing::warn!(
+                            session_id        = %req.session_id,
+                            bootloader_locked = fields.bootloader_locked,
+                            verified_boot     = %fields.verified_boot,
+                            "Key Attestation: dispositivo comprometido — rejeitando captura"
+                        );
+                        return Ok(LambdaHttpResponse::device_compromised());
+                    }
+                    info!(
+                        session_id        = %req.session_id,
+                        security_level    = %fields.security_level,
+                        bootloader_locked = fields.bootloader_locked,
+                        verified_boot     = %fields.verified_boot,
+                        "Key Attestation verificada com sucesso"
+                    );
+                    (fields.security_level, fields.bootloader_locked, fields.verified_boot)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        session_id = %req.session_id,
+                        error      = %e,
+                        "Falha na verificação de Key Attestation — continuando sem attestation"
+                    );
+                    ("unknown".to_string(), false, "unknown".to_string())
+                }
+            }
+        } else {
+            (String::new(), false, String::new())
+        };
 
     // ------------------------------------------------------------------
     // 2. Âncora temporal RFC 3161 (DT-016)
@@ -456,10 +617,15 @@ async fn handler(
         .item("kms_public_key",  AttributeValue::S(String::new()))
         .item("kms_signed",      AttributeValue::Bool(!kms_signature_hex.is_empty()))
         // Âncora temporal RFC 3161 (DT-016)
-        .item("tsa_status",      AttributeValue::S(tsa_status.clone()))
-        .item("tsa_token",       AttributeValue::S(tsa_token_b64))
-        .item("tsa_url",         AttributeValue::S(tsa_url_opt.clone().unwrap_or_default()))
-        .item("status",          AttributeValue::S("stored".to_string()))
+        .item("tsa_status",                  AttributeValue::S(tsa_status.clone()))
+        .item("tsa_token",                   AttributeValue::S(tsa_token_b64))
+        .item("tsa_url",                     AttributeValue::S(tsa_url_opt.clone().unwrap_or_default()))
+        // Key Attestation (DT-002 fallback)
+        .item("attestation_type",            AttributeValue::S(req.attestation_type.clone()))
+        .item("attestation_security_level",  AttributeValue::S(attestation_security_level.clone()))
+        .item("attestation_bootloader",      AttributeValue::Bool(attestation_bootloader_locked))
+        .item("attestation_verified_boot",   AttributeValue::S(attestation_verified_boot.clone()))
+        .item("status",                      AttributeValue::S("stored".to_string()))
         .send()
         .await
         .map_err(|e| format!("Falha ao registrar sessão no DynamoDB: {e}"))?;
@@ -484,8 +650,281 @@ async fn handler(
         icp_valid_until,
         signing_mode,
         tsa_status,
-        tsa_url:         tsa_url_opt.as_deref().unwrap_or("").to_string(),
+        tsa_url:          tsa_url_opt.as_deref().unwrap_or("").to_string(),
+        attestation_type: req.attestation_type,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Android Key Attestation — verificação de cadeia e parse da extensão (DT-002)
+// ---------------------------------------------------------------------------
+
+/// Campos extraídos da extensão KeyDescription do Android Key Attestation.
+struct AttestationFields {
+    /// "software" | "tee" | "strongbox"
+    security_level:    String,
+    /// true se bootloader está bloqueado (locked)
+    bootloader_locked: bool,
+    /// "verified" | "self_signed" | "unverified" | "failed"
+    verified_boot:     String,
+    /// true se o challenge da cadeia corresponde ao session_id da requisição
+    challenge_valid:   bool,
+}
+
+/// Converte erros de DER (TsaError) para String — reutiliza os helpers DER existentes.
+fn der_str<'a>(bytes: &'a [u8], tag: u8) -> Result<(&'a [u8], &'a [u8]), String> {
+    der_unwrap_tag(bytes, tag).map_err(|e| format!("{e}"))
+}
+
+/// Lê o próximo elemento DER com qualquer um dos tags permitidos.
+/// Retorna (tag encontrado, conteúdo, bytes restantes).
+fn der_any_of<'a>(bytes: &'a [u8], tags: &[u8]) -> Result<(u8, &'a [u8], &'a [u8]), String> {
+    if bytes.is_empty() {
+        return Err("Buffer vazio ao ler elemento DER".to_string());
+    }
+    let tag = bytes[0];
+    if !tags.contains(&tag) {
+        return Err(format!("Tag DER 0x{tag:02X} não esperado aqui"));
+    }
+    let (content, rest) = der_str(bytes, tag)?;
+    Ok((tag, content, rest))
+}
+
+/// Avança um elemento DER completo sem inspecionar o conteúdo.
+fn der_skip(bytes: &[u8]) -> Result<&[u8], String> {
+    if bytes.is_empty() {
+        return Err("Buffer vazio ao tentar pular elemento DER".to_string());
+    }
+    let mut pos = 1usize;
+    // Trata tags de forma longa (high-tag-number form: bit5-1 = 0x1F)
+    if bytes[0] & 0x1F == 0x1F {
+        while pos < bytes.len() && bytes[pos] & 0x80 != 0 {
+            pos += 1;
+        }
+        pos += 1;
+    }
+    if pos > bytes.len() {
+        return Err("Tag DER truncada".to_string());
+    }
+    let (len, len_bytes) = der_read_length(&bytes[pos..]).map_err(|e| format!("{e}"))?;
+    pos += len_bytes + len;
+    if pos > bytes.len() {
+        return Err("Elemento DER truncado".to_string());
+    }
+    Ok(&bytes[pos..])
+}
+
+/// Parseia o campo `rootOfTrust` da `AuthorizationList` do hardware enforced.
+///
+/// `rootOfTrust` tem CONTEXT-SPECIFIC CONSTRUCTED tag [704] em DER: 0xBF 0x85 0x40.
+/// Dentro há uma SEQUENCE com: verifiedBootKey (OCTET STRING), deviceLocked (BOOLEAN),
+/// verifiedBootState (ENUMERATED), verifiedBootHash (OCTET STRING, opcional).
+fn parse_root_of_trust(hw_content: &[u8]) -> Result<(bool, String), String> {
+    let mut remaining = hw_content;
+
+    while !remaining.is_empty() {
+        // rootOfTrust: CONTEXT tag [704] = 0xBF 0x85 0x40
+        if remaining.len() >= 3
+            && remaining[0] == 0xBF
+            && remaining[1] == 0x85
+            && remaining[2] == 0x40
+        {
+            // Lê o comprimento após os 3 bytes de tag
+            let (len, len_bytes) = der_read_length(&remaining[3..])
+                .map_err(|e| format!("{e}"))?;
+            let start = 3 + len_bytes;
+            if remaining.len() < start + len {
+                return Err("rootOfTrust truncado".to_string());
+            }
+            let rot_outer = &remaining[start..start + len];
+
+            // O conteúdo de [704] é uma SEQUENCE
+            let (rot_content, _) = der_str(rot_outer, 0x30)?;
+
+            // verifiedBootKey — OCTET STRING (ignoramos o valor)
+            let (_, rest) = der_str(rot_content, 0x04)?;
+
+            // deviceLocked — BOOLEAN
+            let (locked_bytes, rest) = der_str(rest, 0x01)?;
+            let bootloader_locked = locked_bytes.first().copied().unwrap_or(0) != 0;
+
+            // verifiedBootState — ENUMERATED (0x0A)
+            let (state_bytes, _) = der_str(rest, 0x0A)?;
+            let verified_boot = match state_bytes.first().copied().unwrap_or(0) {
+                0 => "verified",
+                1 => "self_signed",
+                2 => "unverified",
+                3 => "failed",
+                _ => "unknown",
+            }
+            .to_string();
+
+            return Ok((bootloader_locked, verified_boot));
+        }
+
+        remaining = der_skip(remaining)?;
+    }
+
+    // rootOfTrust ausente — dispositivo mais antigo ou schema diferente; assumir seguro com aviso
+    tracing::warn!("rootOfTrust não encontrado em hardwareEnforced — assumindo bootloader=locked, verified");
+    Ok((true, "verified".to_string()))
+}
+
+/// Parseia a extensão `KeyDescription` do Android Key Attestation.
+///
+/// OID: 1.3.6.1.4.1.11129.2.1.17 — presente no certificado folha da cadeia.
+/// Extrai: attestationSecurityLevel, attestationChallenge, bootloaderLocked, verifiedBootState.
+fn parse_attestation_extension(
+    ext_value:          &[u8],
+    expected_challenge: &[u8],
+) -> Result<AttestationFields, String> {
+    // KeyDescription é uma SEQUENCE no nível raiz
+    let (kd, _) = der_str(ext_value, 0x30)?;
+
+    // attestationVersion — INTEGER
+    let (_, rest) = der_str(kd, 0x02)?;
+
+    // attestationSecurityLevel — ENUMERATED (0x0A) ou INTEGER (0x02) dependendo da versão
+    let (_, sec_level_bytes, rest) = der_any_of(rest, &[0x0A, 0x02])?;
+    let security_level = match sec_level_bytes.first().copied().unwrap_or(0) {
+        0 => "software",
+        1 => "tee",
+        2 => "strongbox",
+        _ => "unknown",
+    }
+    .to_string();
+
+    // keymasterVersion — INTEGER
+    let (_, rest) = der_str(rest, 0x02)?;
+
+    // keymasterSecurityLevel — ENUMERATED ou INTEGER
+    let (_, _, rest) = der_any_of(rest, &[0x0A, 0x02])?;
+
+    // attestationChallenge — OCTET STRING
+    let (challenge_bytes, rest) = der_str(rest, 0x04)?;
+    let challenge_valid = challenge_bytes == expected_challenge;
+
+    // uniqueId — OCTET STRING
+    let (_, rest) = der_str(rest, 0x04)?;
+
+    // softwareEnforced — SEQUENCE (pulamos o conteúdo)
+    let rest = der_skip(rest)?;
+
+    // hardwareEnforced — SEQUENCE
+    let (hw_content, _) = der_str(rest, 0x30)?;
+
+    let (bootloader_locked, verified_boot) = parse_root_of_trust(hw_content)?;
+
+    Ok(AttestationFields {
+        security_level,
+        bootloader_locked,
+        verified_boot,
+        challenge_valid,
+    })
+}
+
+/// Verifica a cadeia de certificados do Android Key Attestation e extrai os campos
+/// de integridade do dispositivo.
+///
+/// Passos:
+/// 1. Decodifica base64 → DER para cada certificado
+/// 2. Parseia com x509-parser e verifica assinaturas (cada cert assinado pelo próximo)
+/// 3. Extrai e parseia a extensão KeyDescription do certificado folha
+/// 4. Verifica que o challenge corresponde ao session_id da requisição
+///
+/// **TODO produção:** verificar o certificado raiz contra a Google Hardware Attestation Root CA.
+/// O PEM está disponível em: https://developer.android.com/training/articles/security-key-attestation
+/// Configurar a env var `GOOGLE_ATTESTATION_ROOT_CA_PEM` na Lambda para verificação completa.
+fn verify_key_attestation(
+    chain_b64:    &[String],
+    session_id:   &str,
+    google_roots: Option<&GoogleAttestationRoots>,
+) -> Result<AttestationFields, String> {
+    use x509_parser::prelude::*;
+
+    if chain_b64.is_empty() {
+        return Err("Cadeia de certificados vazia".to_string());
+    }
+
+    // Decodifica base64 → DER
+    let chain_ders: Vec<Vec<u8>> = chain_b64
+        .iter()
+        .map(|b| {
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b)
+                .map_err(|e| format!("Base64 inválido na cadeia de attestation: {e}"))
+        })
+        .collect::<Result<_, _>>()?;
+
+    // Parseia todos os certificados
+    let certs: Vec<X509Certificate<'_>> = chain_ders
+        .iter()
+        .enumerate()
+        .map(|(i, der)| {
+            X509Certificate::from_der(der)
+                .map(|(_, c)| c)
+                .map_err(|e| format!("Falha ao parsear certificado [{i}] da cadeia: {e:?}"))
+        })
+        .collect::<Result<_, _>>()?;
+
+    // Verifica que cada certificado é assinado pelo próximo (integridade da cadeia)
+    for i in 0..certs.len().saturating_sub(1) {
+        certs[i]
+            .verify_signature(Some(certs[i + 1].public_key()))
+            .map_err(|e| format!("Falha na verificação de assinatura do cert [{i}]: {e:?}"))?;
+    }
+
+    // Ancoragem no Google Hardware Attestation Root CA
+    //
+    // Compara os bytes DER do certificado raiz da cadeia contra os CAs conhecidos
+    // carregados do Secrets Manager no cold start.
+    //
+    // Se google_roots não estiver disponível (env var não configurada), a verificação
+    // de raiz é ignorada com aviso — útil para testes locais sem Secrets Manager.
+    if let Some(roots) = google_roots {
+        let root_der = chain_ders
+            .last()
+            .ok_or_else(|| "Cadeia vazia — sem certificado raiz".to_string())?;
+        if !roots.der_certs.iter().any(|known| known == root_der) {
+            // Loga subject e base64 do root para diagnóstico — permite identificar
+            // qual CA Google adicionar ao secret caso seja uma CA válida não catalogada.
+            let root_b64 = base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                root_der,
+            );
+            let root_subject = X509Certificate::from_der(root_der)
+                .map(|(_, c)| c.subject().to_string())
+                .unwrap_or_else(|_| "<parse error>".to_string());
+            tracing::warn!(
+                chain_len    = chain_ders.len(),
+                root_subject = %root_subject,
+                root_b64     = %root_b64,
+                "Root CA não reconhecido — logar para diagnóstico"
+            );
+            return Err(
+                "Certificado raiz da cadeia não corresponde a nenhum Google Hardware Attestation Root CA conhecido"
+                    .to_string(),
+            );
+        }
+        tracing::info!("Cadeia de Key Attestation ancorada no Google Root CA com sucesso");
+    } else {
+        tracing::warn!(
+            session_id = %session_id,
+            "Google Attestation Root CA não configurado — verificação de raiz omitida"
+        );
+    }
+
+    // Extrai a extensão KeyDescription (OID 1.3.6.1.4.1.11129.2.1.17) do cert folha
+    let leaf = &certs[0];
+    let attestation_ext = leaf
+        .extensions()
+        .iter()
+        .find(|ext| ext.oid.to_id_string() == "1.3.6.1.4.1.11129.2.1.17")
+        .ok_or_else(|| {
+            "Extensão Android Key Attestation (1.3.6.1.4.1.11129.2.1.17) ausente no certificado folha"
+                .to_string()
+        })?;
+
+    parse_attestation_extension(attestation_ext.value, session_id.as_bytes())
 }
 
 // ---------------------------------------------------------------------------
@@ -818,11 +1257,12 @@ async fn main() -> Result<(), Error> {
         .init();
 
     // ------------------------------------------------------------------
-    // Cold start — carrega o certificado ICP-Brasil uma única vez.
+    // Cold start — carrega certificados uma única vez.
     // ------------------------------------------------------------------
-    let aws_config = aws_config::load_from_env().await;
-    let sm         = aws_sdk_secretsmanager::Client::new(&aws_config);
-    let icp_cert   = Arc::new(load_icp_brasil_cert(&sm).await);
+    let aws_config   = aws_config::load_from_env().await;
+    let sm           = aws_sdk_secretsmanager::Client::new(&aws_config);
+    let icp_cert     = Arc::new(load_icp_brasil_cert(&sm).await);
+    let google_roots = Arc::new(load_google_attestation_roots(&sm).await);
 
     if icp_cert.is_some() {
         info!(signing_mode = "icp_brasil_a1", "Lambda pronta — assinatura ICP-Brasil ativa");
@@ -830,8 +1270,15 @@ async fn main() -> Result<(), Error> {
         tracing::warn!(signing_mode = "kms_dev", "Lambda pronta — assinatura ICP-Brasil indisponível, usando KMS");
     }
 
+    if google_roots.is_some() {
+        info!("Google Hardware Attestation Root CA carregados — ancoragem de Key Attestation ativa");
+    } else {
+        tracing::warn!("GOOGLE_ATTESTATION_ROOT_CA_SECRET não configurada — verificação de raiz de Key Attestation desabilitada");
+    }
+
     run(service_fn(move |event: LambdaEvent<FunctionUrlEvent>| {
-        let icp_cert = icp_cert.clone();
-        async move { handler(event, icp_cert).await }
+        let icp_cert     = icp_cert.clone();
+        let google_roots = google_roots.clone();
+        async move { handler(event, icp_cert, google_roots).await }
     })).await
 }

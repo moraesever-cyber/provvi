@@ -35,7 +35,7 @@ Baseline: cold start ~7s, warm ~3.5s, GPS dominante ~3s.
 ---
 
 ## DT-002 — Play Integrity: Migração Classic → Standard + cloudProjectNumber
-**Prioridade:** Alta | **Status:** Implementado, aguardando configuração | **Registrado:** 2026-03-06 | **Revisado:** 2026-03-12
+**Prioridade:** Alta | **Status:** Implementado, aguardando configuração | **Registrado:** 2026-03-06 | **Revisado:** 2026-03-13
 
 **Problema original:**
 Play Integrity usando a Classic API sem `cloudProjectNumber` — resultado "Indisponível"
@@ -47,12 +47,30 @@ e latência de ~5s por captura.
 - `ProvviCapture.kt`: warmup assíncrono disparado no `init {}`
 - Com `cloudProjectNumber = 0L`, warmup é ignorado silenciosamente — sem regressão
 
+**Implementado em 2026-03-13 — Classic API como fallback:**
+Enquanto `cloudProjectNumber = 0L`, `check()` agora usa a Classic Play Integrity API
+como ponte, em vez de retornar `Unavailable` imediatamente. Isso permite obter
+`deviceIntegrity` ancorado em hardware em distribuições MDM (HabilitAi) sem Play Store.
+
+- `DeviceIntegrityChecker.kt`: constante `USE_CLASSIC_FALLBACK = true` como feature flag
+- `checkViaClassicApi()`: chamada a `IntegrityManagerFactory.create(context)` (Classic)
+- `check()`: se `tokenProvider == null` e `USE_CLASSIC_FALLBACK`, delega para Classic API
+- Timeout separado `timeoutClassicMillis = 8_000L` (sem warmUp, latência maior)
+- Classic API aceita nonce de até 50 chars — `requestHash.take(50)`
+- `appLicensingVerdict` retorna `UNLICENSED` em MDM — esperado e não bloqueante (DT-014b)
+
+**Para reverter quando `cloudProjectNumber` estiver configurado:**
+1. Deletar `checkViaClassicApi()`
+2. Deletar `USE_CLASSIC_FALLBACK`
+3. Deletar `timeoutClassicMillis`
+4. Restaurar `check()`: `val provider = tokenProvider ?: return IntegrityResult.Unavailable`
+
 **Pendente (bloqueio externo):**
 Substituir `0L` pelo número real do projeto Google Cloud após:
 1. Abertura de conta Provvi na Play Store (aguardando alteração de razão social)
 2. Publicação do app em internal testing
 
-Quando configurado: latência ~5000ms → ~150ms, card "❌ Indisponível" → "✅ Verificado"
+Quando configurado: Standard API ativa, Classic fallback desativado, latência ~150ms
 
 **Entendimento revisado em 2026-03-12 — campos são independentes:**
 
