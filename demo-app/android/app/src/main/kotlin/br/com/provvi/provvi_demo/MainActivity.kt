@@ -56,6 +56,10 @@ class MainActivity : FlutterActivity() {
                         val capturedBy = call.argument<String>("capturedBy") ?: "Provvi Demo"
                         handleCapture(referenceId, capturedBy, result)
                     }
+                    "captureDataset" -> {
+                        val label = call.argument<String>("label") ?: "real"
+                        handleDatasetCapture(label, result)
+                    }
                     "checkPermissions" -> {
                         result.success(hasRequiredPermissions())
                     }
@@ -120,6 +124,62 @@ class MainActivity : FlutterActivity() {
                         "Possível recaptura detectada (score: ${"%.2f".format(outcome.score)}, indicadores: ${outcome.indicators.joinToString()})",
                         null
                     )
+                is br.com.provvi.CaptureOutcome.BackendError ->
+                    result.error("BACKEND_ERROR", outcome.message, null)
+            }
+        }
+    }
+
+    /**
+     * Captura para coleta de dataset — sem formulário, sem upload ao backend.
+     * Retorna os bytes JPEG diretamente para o Flutter salvar na pasta correta.
+     * RECAPTURE_SUSPECTED não bloqueia — queremos capturar recapturas intencionais.
+     */
+    private fun handleDatasetCapture(
+        label: String,
+        result: MethodChannel.Result
+    ) {
+        if (!hasRequiredPermissions()) {
+            result.error("PERMISSION_DENIED", "Permissões necessárias não concedidas", null)
+            return
+        }
+
+        CoroutineScope(Dispatchers.Main).launch {
+            val outcome = provviCapture.capture(
+                lifecycleOwner = ProcessLifecycleOwner.get(),
+                assertions = GenericAssertions(
+                    capturedBy  = "dataset_collection",
+                    referenceId = label
+                ),
+                backendClient = null  // sem upload ao backend
+            )
+
+            when (outcome) {
+                is br.com.provvi.CaptureOutcome.Success -> {
+                    result.success(mapOf(
+                        "imageJpegBytes" to outcome.session.imageJpegBytes,
+                        "sessionId"      to outcome.session.sessionId,
+                        "label"          to label
+                    ))
+                }
+                // RecaptureSuspected: retorna erro com score — imagem não foi
+                // assinada pelo backend, mas o Flutter registra o score como diagnóstico
+                is br.com.provvi.CaptureOutcome.RecaptureSuspected ->
+                    result.error(
+                        "RECAPTURE_SUSPECTED",
+                        "score=${"%.3f".format(outcome.score)}",
+                        null
+                    )
+                is br.com.provvi.CaptureOutcome.SigningFailed ->
+                    result.error("SIGNING_FAILED", outcome.reason, null)
+                is br.com.provvi.CaptureOutcome.CaptureError ->
+                    result.error("CAPTURE_ERROR", outcome.reason, null)
+                br.com.provvi.CaptureOutcome.PermissionDenied ->
+                    result.error("PERMISSION_DENIED", "Permissão negada", null)
+                br.com.provvi.CaptureOutcome.DeviceCompromised ->
+                    result.error("DEVICE_COMPROMISED", "Dispositivo comprometido", null)
+                br.com.provvi.CaptureOutcome.MockLocationDetected ->
+                    result.error("MOCK_LOCATION", "Localização simulada", null)
                 is br.com.provvi.CaptureOutcome.BackendError ->
                     result.error("BACKEND_ERROR", outcome.message, null)
             }

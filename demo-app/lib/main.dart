@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'dataset_collection_screen.dart';
 import 'screens/capture_screen.dart';
 import 'screens/identification_screen.dart';
 import 'screens/result_screen.dart';
@@ -25,6 +26,7 @@ class ProvviDemoApp extends StatelessWidget {
         '/capture': (_) => const CaptureScreen(),
         '/result':  (_) => const ResultScreen(),
         '/tamper':  (_) => const TamperScreen(),
+        '/dataset': (_) => const DatasetCollectionScreen(),
       },
     );
   }

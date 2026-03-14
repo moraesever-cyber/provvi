@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../dataset_collection_screen.dart';
 import '../services/provvi_channel.dart';
 import '../theme.dart';
 import '../widgets/provvi_logo.dart';
@@ -135,6 +136,21 @@ class _IdentificationScreenState extends State<IdentificationScreen> {
                                 padding: const EdgeInsets.symmetric(
                                     vertical: 16),
                               ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: TextButton.icon(
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      const DatasetCollectionScreen(),
+                                ),
+                              ),
+                              icon: const Icon(Icons.dataset),
+                              label: const Text('Coletar Dataset'),
                             ),
                           ),
                         ],
