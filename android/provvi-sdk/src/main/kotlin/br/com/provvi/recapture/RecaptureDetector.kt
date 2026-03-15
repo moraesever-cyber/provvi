@@ -158,11 +158,15 @@ object RecaptureDetector {
         // pois não dependem de frequências periódicas finas.
         val strideOther = if (width >= 640) 2 else 1
 
-        // Stride específico para os planos UV do Chromatic.
-        // stride=2 sobre os planos nativos YUV 4:2:0 (que já têm metade da resolução)
-        // resulta em 1/4 da resolução UV original — suficiente para detectar variância
-        // de subpixel, ~4× mais rápido que stride=1, sem o double-stride anterior.
-        val strideChromatic = if (width >= 640) 2 else 1
+        // Stride específico para os planos UV do Chromatic — escala com resolução.
+        // Câmeras de alta resolução (> 2000px) entregam halfOrigW > 1000px; stride=4
+        // limita a análise a ~500px UV, mantendo o sinal detectável.
+        // stride=2 para câmeras padrão (640–2000px), stride=1 abaixo de 640px.
+        val strideChromatic = when {
+            width >= 2000 -> 4   // 12MP+: halfW~500px — ~12k janelas 4×4
+            width >= 640  -> 2   // câmera padrão: ~48k janelas 4×4
+            else          -> 1
+        }
 
         // Plano Y para Moiré e edge sharpness — resolução preservada
         val yPlaneMoire = extractPlaneStrided(imageProxy.planes[0], width, height, strideMoire)
@@ -176,7 +180,10 @@ object RecaptureDetector {
         val effectiveH  = height / strideOther
 
         // Imagens muito escuras não contêm informação espectral suficiente
-        val meanLuminance = yPlaneOther.map { it.toInt() and 0xFF }.average().toFloat()
+        // Loop direto evita boxing de 3M+ Int que causava GC pressure em dispositivos lentos
+        var lumSum = 0L
+        for (b in yPlaneOther) lumSum += (b.toInt() and 0xFF)
+        val meanLuminance = lumSum.toFloat() / yPlaneOther.size
         if (meanLuminance < MIN_LUMINANCE_MEAN) return RecaptureAnalysis.Inconclusive
 
         // Planos U/V com strideChromatic — compromisso entre sinal e performance.
@@ -234,7 +241,7 @@ object RecaptureDetector {
      */
     fun toManifestAssertion(analysis: RecaptureAnalysis): Map<String, Any> = buildMap {
         // Versão do algoritmo — permite rastrear mudanças de limiar em auditorias futuras
-        put("recapture_analysis_version", "1.7")
+        put("recapture_analysis_version", "1.8")
         // Identificador do método — diferencia do pipeline Truepic para fins legais (ADR-002)
         put("recapture_method", "physical_artifact_analysis_no_ml")
 
@@ -419,7 +426,11 @@ object RecaptureDetector {
      * @return Score 0.0–1.0 (1.0 = superfície emissiva com alta confiança).
      */
     private fun detectEmissiveSurface(yPlane: ByteArray, width: Int, height: Int): Float {
-        val meanLum = yPlane.map { it.toInt() and 0xFF }.average().toFloat()
+        // Loop direto evita boxing — em frames de alta resolução (3M+ pixels) o
+        // .map { }.average() criava pressão de GC severa em dispositivos de médio porte
+        var lumSum = 0L
+        for (b in yPlane) lumSum += (b.toInt() and 0xFF)
+        val meanLum = lumSum.toFloat() / yPlane.size
 
         // Luminância muito baixa: sem luz suficiente para distinguir tela de objeto
         if (meanLum < 60f) return 0f

@@ -106,13 +106,19 @@ object RecaptureDetector {
 
         val strideMoire     = if (width > 1080) 2 else 1
         val strideOther     = if (width >= 640) 2 else 1
-        val strideChromatic = if (width >= 640) 2 else 1
+        val strideChromatic = when {
+            width >= 2000 -> 4
+            width >= 640  -> 2
+            else          -> 1
+        }
 
         val yPlaneOther = extractPlaneStrided(imageProxy.planes[0], width, height, strideOther)
         val effectiveW  = width  / strideOther
         val effectiveH  = height / strideOther
 
-        val meanLuminance = yPlaneOther.map { it.toInt() and 0xFF }.average().toFloat()
+        var lumSum = 0L
+        for (b in yPlaneOther) lumSum += (b.toInt() and 0xFF)
+        val meanLuminance = lumSum.toFloat() / yPlaneOther.size
         if (meanLuminance < MIN_LUMINANCE_MEAN) {
             return DiagnosticScores(0f, 0f, 0f, 0f, 0f, meanLuminance, "INCONCLUSIVE")
         }
@@ -221,7 +227,9 @@ object RecaptureDetector {
     // ---------------------------------------------------------------------------
 
     private fun detectEmissiveSurface(yPlane: ByteArray, width: Int, height: Int): Float {
-        val meanLum = yPlane.map { it.toInt() and 0xFF }.average().toFloat()
+        var lumSum = 0L
+        for (b in yPlane) lumSum += (b.toInt() and 0xFF)
+        val meanLum = lumSum.toFloat() / yPlane.size
         if (meanLum < 60f) return 0f
 
         val windowSize = 8
