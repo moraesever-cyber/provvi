@@ -81,10 +81,12 @@ sealed class RecaptureAnalysis {
  * - **Nitidez de bordas** (peso 0.40): bordas abruptas de texto/ícones de tela (gradiente ≥ 70)
  *   vs. gradientes suaves de objetos físicos iluminados por luz contínua.
  *
- * **Estratégia de stride separado por análise (v1.1):**
- * Moiré e nitidez de bordas operam com stride=1 (ou stride=2 apenas para frames > 1080px)
- * para evitar aliasing na detecção de grades de pixels. Specular e chromatic toleram
- * stride=2 sem perda de sinal, mantendo o ganho de performance original.
+ * **Estratégia de stride separado por análise (v1.7):**
+ * Moiré e edge sharpness: strideMoire (stride=1 para frames ≤ 1080px, stride=2 acima)
+ * Emissive surface (Y): strideOther=2 para frames ≥ 640px
+ * Chromatic (UV): strideChromatic=2 sobre planos nativos YUV 4:2:0 —
+ *   resulta em 1/4 da resolução UV original, ~4× mais rápido que stride=1,
+ *   mantendo sinal de subpixel detectável.
  *
  * Nenhum dos caminhos segue o pipeline patenteado da Truepic
  * (score ML + score estatístico → probabilidade combinada). Ver ADR-002.
@@ -156,6 +158,12 @@ object RecaptureDetector {
         // pois não dependem de frequências periódicas finas.
         val strideOther = if (width >= 640) 2 else 1
 
+        // Stride específico para os planos UV do Chromatic.
+        // stride=2 sobre os planos nativos YUV 4:2:0 (que já têm metade da resolução)
+        // resulta em 1/4 da resolução UV original — suficiente para detectar variância
+        // de subpixel, ~4× mais rápido que stride=1, sem o double-stride anterior.
+        val strideChromatic = if (width >= 640) 2 else 1
+
         // Plano Y para Moiré e edge sharpness — resolução preservada
         val yPlaneMoire = extractPlaneStrided(imageProxy.planes[0], width, height, strideMoire)
         val moireW      = width  / strideMoire
@@ -171,15 +179,16 @@ object RecaptureDetector {
         val meanLuminance = yPlaneOther.map { it.toInt() and 0xFF }.average().toFloat()
         if (meanLuminance < MIN_LUMINANCE_MEAN) return RecaptureAnalysis.Inconclusive
 
-        // Planos U/V sem stride adicional — YUV 4:2:0 já tem metade da resolução em cada dimensão.
-        // Aplicar strideOther reduziria para 1/16 da resolução original, eliminando o sinal de
-        // subpixel que detectScreenChromaticPattern precisa (DT-004).
+        // Planos U/V com strideChromatic — compromisso entre sinal e performance.
+        // YUV 4:2:0 já tem metade da resolução; strideChromatic=2 resulta em 1/4 da
+        // resolução UV original (vs 1/16 com double-stride anterior — DT-004).
+        // Preserva variância de subpixel suficiente para detectScreenChromaticPattern.
         val halfOrigW = width  / 2
         val halfOrigH = height / 2
-        val uPlane    = extractPlane(imageProxy.planes[1], halfOrigW, halfOrigH)
-        val vPlane    = extractPlane(imageProxy.planes[2], halfOrigW, halfOrigH)
-        val halfW     = halfOrigW
-        val halfH     = halfOrigH
+        val uPlane    = extractPlaneStrided(imageProxy.planes[1], halfOrigW, halfOrigH, strideChromatic)
+        val vPlane    = extractPlaneStrided(imageProxy.planes[2], halfOrigW, halfOrigH, strideChromatic)
+        val halfW     = halfOrigW / strideChromatic
+        val halfH     = halfOrigH / strideChromatic
 
         // Executa as quatro análises independentes (ver ADR-002, Caminho 1 — v1.1)
         val scoreMoire     = detectMoire(yPlaneMoire, moireW, moireH)
@@ -225,7 +234,7 @@ object RecaptureDetector {
      */
     fun toManifestAssertion(analysis: RecaptureAnalysis): Map<String, Any> = buildMap {
         // Versão do algoritmo — permite rastrear mudanças de limiar em auditorias futuras
-        put("recapture_analysis_version", "1.6")
+        put("recapture_analysis_version", "1.7")
         // Identificador do método — diferencia do pipeline Truepic para fins legais (ADR-002)
         put("recapture_method", "physical_artifact_analysis_no_ml")
 

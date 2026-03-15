@@ -51,7 +51,7 @@ data class DiagnosticScores(
 )
 
 // ---------------------------------------------------------------------------
-// Detector (cópia de produção — v1.6)
+// Detector (cópia de produção — v1.7)
 // ---------------------------------------------------------------------------
 
 object RecaptureDetector {
@@ -104,8 +104,9 @@ object RecaptureDetector {
             return DiagnosticScores(0f, 0f, 0f, 0f, 0f, 0f, "INCONCLUSIVE")
         }
 
-        val strideMoire = if (width > 1080) 2 else 1
-        val strideOther = if (width >= 640) 2 else 1
+        val strideMoire     = if (width > 1080) 2 else 1
+        val strideOther     = if (width >= 640) 2 else 1
+        val strideChromatic = if (width >= 640) 2 else 1
 
         val yPlaneOther = extractPlaneStrided(imageProxy.planes[0], width, height, strideOther)
         val effectiveW  = width  / strideOther
@@ -118,10 +119,10 @@ object RecaptureDetector {
 
         val halfOrigW = width  / 2
         val halfOrigH = height / 2
-        val uPlane    = extractPlane(imageProxy.planes[1], halfOrigW, halfOrigH)
-        val vPlane    = extractPlane(imageProxy.planes[2], halfOrigW, halfOrigH)
-        val halfW     = halfOrigW
-        val halfH     = halfOrigH
+        val uPlane    = extractPlaneStrided(imageProxy.planes[1], halfOrigW, halfOrigH, strideChromatic)
+        val vPlane    = extractPlaneStrided(imageProxy.planes[2], halfOrigW, halfOrigH, strideChromatic)
+        val halfW     = halfOrigW / strideChromatic
+        val halfH     = halfOrigH / strideChromatic
 
         val yMoire  = if (strideMoire == strideOther) yPlaneOther
                       else extractPlaneStrided(imageProxy.planes[0], width, height, strideMoire)
